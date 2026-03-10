@@ -1,0 +1,9 @@
+---
+description: (One-line description — helps Cursor decide relevance)
+globs: "*.ext1,*.ext2"
+---
+
+# Rule Title
+
+(Your instructions here. This rule loads automatically when files
+matching the glob patterns above are open in the editor.)

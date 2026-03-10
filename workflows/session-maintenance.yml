@@ -1,0 +1,221 @@
+# .github/workflows/session-maintenance.yml
+#
+# Scheduled maintenance for session logs and project hygiene.
+# Replaces local cron jobs — runs server-side regardless of laptop state.
+# Creates PRs for cleanup so changes are visible and reviewable.
+
+name: Session Maintenance
+
+on:
+  schedule:
+    # Run daily at 6 AM UTC (10 PM PST / 11 PM PDT)
+    - cron: '0 6 * * *'
+  workflow_dispatch:  # Manual trigger for testing
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  # ─────────────────────────────────────────────
+  # Job 1: Archive stale session logs
+  # ─────────────────────────────────────────────
+  archive-logs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Archive old session logs
+        id: archive
+        run: |
+          SESSION_DIR="session-logs"
+          ARCHIVE_DIR="${SESSION_DIR}/archive"
+
+          if [[ ! -d "$SESSION_DIR" ]]; then
+            echo "No session-logs/ directory — skipping"
+            echo "archived=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          mkdir -p "$ARCHIVE_DIR"
+          ARCHIVED=0
+
+          # Archive session logs older than 30 days
+          while IFS= read -r f; do
+            mv "$f" "$ARCHIVE_DIR/"
+            ARCHIVED=$((ARCHIVED + 1))
+          done < <(find "$SESSION_DIR" -maxdepth 1 -name "session-*.md" -mtime +30 2>/dev/null || true)
+
+          # Archive activity logs older than 30 days
+          while IFS= read -r f; do
+            mv "$f" "$ARCHIVE_DIR/"
+            ARCHIVED=$((ARCHIVED + 1))
+          done < <(find "$SESSION_DIR" -maxdepth 1 -name "activity-*.md" -mtime +30 2>/dev/null || true)
+
+          # Archive handoffs older than 14 days
+          while IFS= read -r f; do
+            mv "$f" "$ARCHIVE_DIR/"
+            ARCHIVED=$((ARCHIVED + 1))
+          done < <(find "$SESSION_DIR" -maxdepth 1 -name "handoff-*.md" -mtime +14 2>/dev/null || true)
+
+          echo "archived=${ARCHIVED}" >> "$GITHUB_OUTPUT"
+          echo "Archived ${ARCHIVED} file(s)"
+
+      - name: Commit archived logs
+        if: steps.archive.outputs.archived != '0'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add session-logs/
+          git commit -m "chore(sessions): archive ${{ steps.archive.outputs.archived }} stale log(s)"
+          git push
+
+  # ─────────────────────────────────────────────
+  # Job 2: Detect stale handoffs and open issue
+  # ─────────────────────────────────────────────
+  stale-handoff-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for stale handoffs
+        id: stale
+        run: |
+          SESSION_DIR="session-logs"
+
+          if [[ ! -d "$SESSION_DIR" ]]; then
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Check if there's been recent commit activity but no recent handoff
+          RECENT_COMMITS=$(git log --oneline --since="3 days ago" 2>/dev/null | wc -l | tr -d " ")
+          RECENT_HANDOFF=$(find "$SESSION_DIR" -maxdepth 1 -name "handoff-*.md" -mtime -7 2>/dev/null | wc -l | tr -d " ")
+
+          if [[ "$RECENT_COMMITS" -gt 5 && "$RECENT_HANDOFF" -eq 0 ]]; then
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+            echo "commits=${RECENT_COMMITS}" >> "$GITHUB_OUTPUT"
+            echo "⚠️ ${RECENT_COMMITS} commits in last 3 days but no handoff in last 7 days"
+          else
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+            echo "✅ Handoff status OK (${RECENT_COMMITS} recent commits, ${RECENT_HANDOFF} recent handoffs)"
+          fi
+
+      - name: Create reminder issue
+        if: steps.stale.outputs.stale == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Check if a stale-handoff issue is already open
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'session-maintenance',
+              state: 'open'
+            });
+
+            const existing = issues.data.find(i => i.title.includes('handoff'));
+            if (existing) {
+              console.log('Stale handoff issue already open: #' + existing.number);
+              return;
+            }
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🔄 Stale handoff — active project with no recent session handoff',
+              body: `## Session Continuity Alert\n\n` +
+                `This project has **${{ steps.stale.outputs.commits }}** commits in the last 3 days ` +
+                `but no handoff file in the last 7 days.\n\n` +
+                `### Action\n` +
+                `Run \`@handoff\` in Cursor or Copilot CLI to create a continuation prompt ` +
+                `in \`session-logs/handoff-*.md\`.\n\n` +
+                `This ensures session context isn't lost between work sessions.\n\n` +
+                `---\n*Auto-generated by session-maintenance workflow. Close when resolved.*`,
+              labels: ['session-maintenance']
+            });
+
+  # ─────────────────────────────────────────────
+  # Job 3: Weekly session summary (Sundays only)
+  # ─────────────────────────────────────────────
+  weekly-summary:
+    runs-on: ubuntu-latest
+    # Only run on Sundays
+    if: github.event.schedule == '0 6 * * 0' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate weekly summary
+        run: |
+          SESSION_DIR="session-logs"
+          WEEK_START=$(date -d "7 days ago" +%Y-%m-%d 2>/dev/null || date -v-7d +%Y-%m-%d)
+          SUMMARY_FILE="${SESSION_DIR}/weekly-${WEEK_START}.md"
+
+          mkdir -p "$SESSION_DIR"
+
+          # Gather metrics
+          COMMIT_COUNT=$(git log --oneline --since="7 days ago" 2>/dev/null | wc -l | tr -d " ")
+          AUTHOR_COUNT=$(git log --format="%an" --since="7 days ago" 2>/dev/null | sort -u | wc -l | tr -d " ")
+          SESSION_COUNT=$(find "$SESSION_DIR" -maxdepth 1 -name "session-*.md" -mtime -7 2>/dev/null | wc -l | tr -d " ")
+          FILES_CHANGED=$(git diff --shortstat "HEAD@{7 days ago}" 2>/dev/null || echo "unknown")
+
+          # Most active directories
+          TOP_DIRS=$(git log --name-only --since="7 days ago" --pretty=format: 2>/dev/null \
+            | grep -v '^$' | xargs -I{} dirname {} | sort | uniq -c | sort -rn | head -5 \
+            | awk '{print "- " $2 " (" $1 " changes)"}' || echo "- (unable to determine)")
+
+          # Commit type breakdown
+          FEAT_COUNT=$(git log --oneline --since="7 days ago" 2>/dev/null | grep -ciE "^[a-f0-9]+ feat" || echo 0)
+          FIX_COUNT=$(git log --oneline --since="7 days ago" 2>/dev/null | grep -ciE "^[a-f0-9]+ fix" || echo 0)
+          REFACTOR_COUNT=$(git log --oneline --since="7 days ago" 2>/dev/null | grep -ciE "^[a-f0-9]+ refactor" || echo 0)
+          DOCS_COUNT=$(git log --oneline --since="7 days ago" 2>/dev/null | grep -ciE "^[a-f0-9]+ docs" || echo 0)
+          OTHER_COUNT=$((COMMIT_COUNT - FEAT_COUNT - FIX_COUNT - REFACTOR_COUNT - DOCS_COUNT))
+
+          cat > "$SUMMARY_FILE" << SUMMARY
+          # Weekly Summary — ${WEEK_START}
+
+          ## Metrics
+          | Metric | Value |
+          |--------|-------|
+          | Commits | ${COMMIT_COUNT} |
+          | Contributors | ${AUTHOR_COUNT} |
+          | Session logs | ${SESSION_COUNT} |
+          | Net changes | ${FILES_CHANGED} |
+
+          ## Commit Breakdown
+          | Type | Count |
+          |------|-------|
+          | feat | ${FEAT_COUNT} |
+          | fix | ${FIX_COUNT} |
+          | refactor | ${REFACTOR_COUNT} |
+          | docs | ${DOCS_COUNT} |
+          | other | ${OTHER_COUNT} |
+
+          ## Most Active Areas
+          ${TOP_DIRS}
+
+          ## Session Logs This Week
+          $(find "$SESSION_DIR" -maxdepth 1 -name "session-*.md" -mtime -7 -exec basename {} \; 2>/dev/null | sort || echo "(none)")
+
+          ---
+          > Feed this into @mine-sessions in Cursor for AI-powered pattern analysis
+          SUMMARY
+
+          echo "Weekly summary written to ${SUMMARY_FILE}"
+
+      - name: Commit weekly summary
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add session-logs/ || true
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "docs(sessions): weekly summary for $(date -d '7 days ago' +%Y-%m-%d 2>/dev/null || date -v-7d +%Y-%m-%d)"
+            git push
+          fi

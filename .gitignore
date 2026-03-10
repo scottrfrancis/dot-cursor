@@ -1,0 +1,15 @@
+# Generated output (per-project, not part of this repo)
+generated/
+
+# Session logs (per-project)
+session-logs/
+
+# OS noise
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Editor state
+.vscode/
+.idea/

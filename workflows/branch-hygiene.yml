@@ -1,0 +1,172 @@
+# .github/workflows/branch-hygiene.yml
+#
+# Weekly branch hygiene: detect stale branches, orphaned feature branches,
+# and branches that have drifted far from main. Opens an issue with cleanup
+# recommendations.
+
+name: Branch Hygiene
+
+on:
+  schedule:
+    # Run Mondays at 7 AM UTC (Sunday 11 PM PST)
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  check-branches:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Analyze branches
+        id: analyze
+        run: |
+          DEFAULT_BRANCH=$(git remote show origin | grep "HEAD branch" | awk '{print $NF}')
+          REPORT=""
+          STALE_COUNT=0
+          DRIFT_COUNT=0
+
+          echo "Default branch: ${DEFAULT_BRANCH}"
+
+          # Stale branches (no commits in 30+ days)
+          STALE_BRANCHES=""
+          for branch in $(git for-each-ref --sort=-committerdate --format='%(refname:short) %(committerdate:relative)' refs/remotes/origin/ | grep -v HEAD | grep -v "${DEFAULT_BRANCH}$"); do
+            BRANCH_NAME=$(echo "$branch" | awk '{print $1}' | sed 's|origin/||')
+            LAST_DATE=$(echo "$branch" | cut -d' ' -f2-)
+
+            # Check if older than 30 days
+            LAST_EPOCH=$(git log -1 --format="%ct" "origin/${BRANCH_NAME}" 2>/dev/null || echo "0")
+            NOW_EPOCH=$(date +%s)
+            AGE_DAYS=$(( (NOW_EPOCH - LAST_EPOCH) / 86400 ))
+
+            if [[ "$AGE_DAYS" -gt 30 ]]; then
+              STALE_BRANCHES="${STALE_BRANCHES}\n| \`${BRANCH_NAME}\` | ${AGE_DAYS} days | ${LAST_DATE} |"
+              STALE_COUNT=$((STALE_COUNT + 1))
+            fi
+          done
+
+          # Branches that have drifted far from default
+          DRIFTED_BRANCHES=""
+          for branch in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin/ | grep -v HEAD | grep -v "${DEFAULT_BRANCH}$"); do
+            BRANCH_NAME=$(echo "$branch" | sed 's|origin/||')
+            BEHIND=$(git rev-list --count "origin/${BRANCH_NAME}..origin/${DEFAULT_BRANCH}" 2>/dev/null || echo "0")
+
+            if [[ "$BEHIND" -gt 50 ]]; then
+              AHEAD=$(git rev-list --count "origin/${DEFAULT_BRANCH}..origin/${BRANCH_NAME}" 2>/dev/null || echo "0")
+              DRIFTED_BRANCHES="${DRIFTED_BRANCHES}\n| \`${BRANCH_NAME}\` | ${AHEAD} ahead | ${BEHIND} behind |"
+              DRIFT_COUNT=$((DRIFT_COUNT + 1))
+            fi
+          done
+
+          # Total remote branches
+          TOTAL_BRANCHES=$(git for-each-ref --format='%(refname:short)' refs/remotes/origin/ | grep -v HEAD | wc -l | tr -d " ")
+
+          # Merged branches that can be deleted
+          MERGED_BRANCHES=""
+          MERGED_COUNT=0
+          for branch in $(git branch -r --merged "origin/${DEFAULT_BRANCH}" 2>/dev/null | grep -v HEAD | grep -v "${DEFAULT_BRANCH}" | sed 's|origin/||'); do
+            MERGED_BRANCHES="${MERGED_BRANCHES}\n- \`${branch}\`"
+            MERGED_COUNT=$((MERGED_COUNT + 1))
+          done
+
+          # Build report
+          NEEDS_ATTENTION="false"
+          if [[ "$STALE_COUNT" -gt 0 || "$DRIFT_COUNT" -gt 0 || "$MERGED_COUNT" -gt 0 ]]; then
+            NEEDS_ATTENTION="true"
+          fi
+
+          echo "stale_count=${STALE_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "drift_count=${DRIFT_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "merged_count=${MERGED_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "total=${TOTAL_BRANCHES}" >> "$GITHUB_OUTPUT"
+          echo "needs_attention=${NEEDS_ATTENTION}" >> "$GITHUB_OUTPUT"
+
+          # Write report body to file (avoids multiline output issues)
+          cat > /tmp/branch-report.md << REPORT_EOF
+          ## Branch Hygiene Report
+
+          **${TOTAL_BRANCHES}** remote branches total
+
+          REPORT_EOF
+
+          if [[ "$MERGED_COUNT" -gt 0 ]]; then
+            cat >> /tmp/branch-report.md << REPORT_EOF
+          ### 🗑️ Merged Branches (safe to delete: ${MERGED_COUNT})
+          $(echo -e "$MERGED_BRANCHES")
+
+          **Action:** \`git push origin --delete <branch>\` for each
+
+          REPORT_EOF
+          fi
+
+          if [[ "$STALE_COUNT" -gt 0 ]]; then
+            cat >> /tmp/branch-report.md << REPORT_EOF
+          ### 🕸️ Stale Branches (no activity in 30+ days: ${STALE_COUNT})
+          | Branch | Age | Last Activity |
+          |--------|-----|---------------|
+          $(echo -e "$STALE_BRANCHES")
+
+          **Action:** Delete or rebase. If work is in progress, create a handoff.
+
+          REPORT_EOF
+          fi
+
+          if [[ "$DRIFT_COUNT" -gt 0 ]]; then
+            cat >> /tmp/branch-report.md << REPORT_EOF
+          ### 🔀 Drifted Branches (50+ commits behind ${DEFAULT_BRANCH}: ${DRIFT_COUNT})
+          | Branch | Ahead | Behind |
+          |--------|-------|--------|
+          $(echo -e "$DRIFTED_BRANCHES")
+
+          **Action:** Rebase or merge ${DEFAULT_BRANCH} to avoid painful conflicts.
+
+          REPORT_EOF
+          fi
+
+          cat >> /tmp/branch-report.md << REPORT_EOF
+          ---
+          *Auto-generated by branch-hygiene workflow. Close when addressed.*
+          REPORT_EOF
+
+      - name: Create or update hygiene issue
+        if: steps.analyze.outputs.needs_attention == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('/tmp/branch-report.md', 'utf8');
+
+            // Close any existing branch hygiene issues
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'branch-hygiene',
+              state: 'open'
+            });
+
+            for (const issue of issues.data) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed',
+                state_reason: 'completed'
+              });
+            }
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🧹 Branch hygiene: ${
+                parseInt('${{ steps.analyze.outputs.merged_count }}') +
+                parseInt('${{ steps.analyze.outputs.stale_count }}') +
+                parseInt('${{ steps.analyze.outputs.drift_count }}')
+              } branches need attention`,
+              body: body,
+              labels: ['branch-hygiene']
+            });

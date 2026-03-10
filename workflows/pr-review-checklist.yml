@@ -1,0 +1,141 @@
+# .github/workflows/pr-review-checklist.yml
+#
+# Automated PR review checklist. Not a full arch-review (use @arch-review in
+# Cursor with Opus 4.6 for that). This catches common issues automatically:
+# - Config/secret file changes
+# - Large PRs that should be split
+# - Missing test changes alongside code changes
+# - AGENTS.md / rule changes that affect AI behavior
+# - Dependency changes without lockfile updates
+#
+# Posts a review comment with findings. Non-blocking — informational only.
+
+name: PR Review Checklist
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  review-checklist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Analyze PR
+        id: analyze
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+
+          CHANGED_FILES=$(git diff --name-only "${BASE}..${HEAD}")
+          FILE_COUNT=$(echo "$CHANGED_FILES" | grep -c . || echo "0")
+          ADDITIONS=$(git diff --shortstat "${BASE}..${HEAD}" | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || echo "0")
+          DELETIONS=$(git diff --shortstat "${BASE}..${HEAD}" | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' || echo "0")
+
+          FINDINGS=""
+          FINDING_COUNT=0
+
+          # ── Size check ──────────────────────────────
+          if [[ "$FILE_COUNT" -gt 30 ]]; then
+            FINDINGS="${FINDINGS}\n### 📦 Large PR (${FILE_COUNT} files)\nConsider splitting into smaller, focused PRs for easier review.\n"
+            FINDING_COUNT=$((FINDING_COUNT + 1))
+          fi
+
+          TOTAL_LINES=$((ADDITIONS + DELETIONS))
+          if [[ "$TOTAL_LINES" -gt 500 ]]; then
+            FINDINGS="${FINDINGS}\n### 📏 ${TOTAL_LINES} lines changed\n+${ADDITIONS} / -${DELETIONS} — larger PRs have higher defect rates. Consider breaking up if logically separable.\n"
+            FINDING_COUNT=$((FINDING_COUNT + 1))
+          fi
+
+          # ── Secret/config exposure ──────────────────
+          SENSITIVE=$(echo "$CHANGED_FILES" | grep -iE '\.env|secret|credential|\.pem|\.key|token' || true)
+          if [[ -n "$SENSITIVE" ]]; then
+            FINDINGS="${FINDINGS}\n### 🔐 Sensitive files changed\n\`\`\`\n${SENSITIVE}\n\`\`\`\nVerify no secrets are being committed. Check \`.gitignore\`.\n"
+            FINDING_COUNT=$((FINDING_COUNT + 1))
+          fi
+
+          # ── Test coverage ───────────────────────────
+          SRC_CHANGES=$(echo "$CHANGED_FILES" | grep -iE '\.(py|ts|js|go|rs|java)$' | grep -ivE 'test|spec|__test__|_test\.' || true)
+          TEST_CHANGES=$(echo "$CHANGED_FILES" | grep -iE 'test|spec|__test__|_test\.' || true)
+          if [[ -n "$SRC_CHANGES" && -z "$TEST_CHANGES" ]]; then
+            SRC_COUNT=$(echo "$SRC_CHANGES" | wc -l | tr -d " ")
+            FINDINGS="${FINDINGS}\n### 🧪 ${SRC_COUNT} source file(s) changed with no test changes\nFiles:\n\`\`\`\n$(echo "$SRC_CHANGES" | head -10)\n\`\`\`\nConsider adding or updating tests.\n"
+            FINDING_COUNT=$((FINDING_COUNT + 1))
+          fi
+
+          # ── AI instruction changes ──────────────────
+          AI_CHANGES=$(echo "$CHANGED_FILES" | grep -iE 'AGENTS\.md|CLAUDE\.md|\.cursor/|copilot-instructions|\.cursorrules|\.mdc$' || true)
+          if [[ -n "$AI_CHANGES" ]]; then
+            FINDINGS="${FINDINGS}\n### 🤖 AI instruction files changed\n\`\`\`\n${AI_CHANGES}\n\`\`\`\nThese affect AI assistant behavior across the team. Review carefully.\n"
+            FINDING_COUNT=$((FINDING_COUNT + 1))
+          fi
+
+          # ── Dependency changes ──────────────────────
+          DEP_FILES=$(echo "$CHANGED_FILES" | grep -iE 'package\.json$|requirements\.txt$|pyproject\.toml$|go\.mod$|Cargo\.toml$' || true)
+          LOCK_FILES=$(echo "$CHANGED_FILES" | grep -iE 'package-lock|yarn\.lock|poetry\.lock|go\.sum|Cargo\.lock' || true)
+          if [[ -n "$DEP_FILES" && -z "$LOCK_FILES" ]]; then
+            FINDINGS="${FINDINGS}\n### 📦 Dependency files changed without lockfile update\nChanged: \`$(echo "$DEP_FILES" | tr '\n' ' ')\`\nNo lockfile changes detected. Run \`npm install\`, \`pip freeze\`, etc. and commit the lockfile.\n"
+            FINDING_COUNT=$((FINDING_COUNT + 1))
+          fi
+
+          # ── Migration/schema changes ────────────────
+          MIGRATION_FILES=$(echo "$CHANGED_FILES" | grep -iE 'migration|schema|\.sql' || true)
+          if [[ -n "$MIGRATION_FILES" ]]; then
+            FINDINGS="${FINDINGS}\n### 🗄️ Database migration/schema changes detected\n\`\`\`\n${MIGRATION_FILES}\n\`\`\`\nEnsure migrations are reversible and tested against production-like data.\n"
+            FINDING_COUNT=$((FINDING_COUNT + 1))
+          fi
+
+          # ── Write outputs ───────────────────────────
+          echo "finding_count=${FINDING_COUNT}" >> "$GITHUB_OUTPUT"
+
+          if [[ "$FINDING_COUNT" -eq 0 ]]; then
+            echo "✅ No automated findings" > /tmp/review-body.md
+          else
+            {
+              echo "## Automated Review Checklist"
+              echo ""
+              echo "${FINDING_COUNT} item(s) flagged for review:"
+              echo -e "$FINDINGS"
+              echo "---"
+              echo "*Automated checklist — not a substitute for \`@arch-review\` on significant changes.*"
+            } > /tmp/review-body.md
+          fi
+
+      - name: Post review comment
+        if: steps.analyze.outputs.finding_count != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('/tmp/review-body.md', 'utf8');
+
+            // Find and minimize existing bot review comments
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            for (const c of comments.data) {
+              if (c.user.login === 'github-actions[bot]' && c.body.includes('Automated Review Checklist')) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: c.id,
+                  body: '<details><summary>Previous automated review (superseded)</summary>\n\n' + c.body + '\n</details>'
+                });
+              }
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });

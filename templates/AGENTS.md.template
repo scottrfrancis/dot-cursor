@@ -1,0 +1,45 @@
+# AGENTS.md
+
+> Cross-tool AI instructions. Read by Cursor, Copilot CLI, Codex CLI, and Gemini CLI.
+> Keep this file focused on project-level guidance that applies regardless of tool.
+> Tool-specific rules go in `.cursor/rules/` (Cursor) or `.github/instructions/` (Copilot).
+
+## Project Overview
+
+(Describe what this project does in 2-3 sentences.)
+
+## Tech Stack
+
+- **Language:**
+- **Framework:**
+- **Database:**
+- **Infrastructure:**
+
+## Architecture Principles
+
+(List 3-5 key architectural principles. Be specific and actionable.)
+
+## Coding Standards
+
+- Conventional commits: `type(scope): description`
+- (Add project-specific standards)
+
+## File Structure
+
+```
+(Show the key directories and what they contain)
+```
+
+## Common Tasks
+
+- **Run tests:** `(command)`
+- **Start dev server:** `(command)`
+- **Deploy:** `(command)`
+
+## Domain Context
+
+(Any domain-specific terminology or business logic the AI needs to know.)
+
+## Safety / Critical Notes
+
+(Things the AI must never do in this project — e.g., "never modify production configs directly")

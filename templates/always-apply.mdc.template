@@ -1,0 +1,9 @@
+---
+description: (One-line description of what this rule enforces)
+alwaysApply: true
+---
+
+# Rule Title
+
+(Your instructions here. Keep under 50 lines — every Always Apply rule
+consumes context window space in every conversation.)

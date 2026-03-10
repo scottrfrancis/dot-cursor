@@ -1,0 +1,67 @@
+# .github/workflows/commit-lint.yml
+#
+# Validates that all commits in a PR follow conventional commit format.
+# Works with the prepare-commit-msg hook (local) as a server-side gate.
+# Fails the check if any commit doesn't match type(scope): description.
+
+name: Commit Lint
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  lint-commits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate conventional commits
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+
+          # Conventional commit pattern
+          # type(optional-scope): description
+          PATTERN='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-zA-Z0-9._-]+\))?: .+'
+
+          FAILED=0
+          TOTAL=0
+
+          while IFS= read -r line; do
+            TOTAL=$((TOTAL + 1))
+            # Extract just the subject (first line)
+            HASH=$(echo "$line" | cut -d' ' -f1)
+            MSG=$(echo "$line" | cut -d' ' -f2-)
+
+            # Allow merge commits
+            if echo "$MSG" | grep -qE "^Merge "; then
+              continue
+            fi
+
+            if ! echo "$MSG" | grep -qE "$PATTERN"; then
+              echo "❌ ${HASH}: ${MSG}"
+              echo "   Expected: type(scope): description"
+              FAILED=$((FAILED + 1))
+            else
+              echo "✅ ${HASH}: ${MSG}"
+            fi
+          done < <(git log --oneline "${BASE}..${HEAD}")
+
+          echo ""
+          echo "─────────────────────────────"
+          echo "Checked: ${TOTAL} commits"
+          echo "Failed:  ${FAILED}"
+
+          if [[ "$FAILED" -gt 0 ]]; then
+            echo ""
+            echo "Valid types: feat fix docs style refactor perf test build ci chore revert"
+            echo "Format: type(scope): lowercase description, no period"
+            echo ""
+            echo "Fix with: git rebase -i and reword the commits"
+            exit 1
+          fi
+
+          echo "All commits follow conventional format ✅"
