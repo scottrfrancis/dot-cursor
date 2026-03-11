@@ -457,6 +457,16 @@ phase_4_custom_agents() {
       "name": "pickup",
       "model": "claude-sonnet-4-6",
       "prompt": "Resume work from the most recent handoff file.\n\n1. Find the most recent handoff-*.md in session-logs/ modified within the last 7 days (sort -r, take first). If none found, say so and suggest running @lets-go instead.\n\n2. Read and display the full contents of the handoff file.\n\n3. Quick git sync: run git fetch origin silently, then report: current branch, commits behind upstream, commits ahead of upstream, dirty/clean working tree (git status --porcelain).\n\n4. Archive the handoff: move the file to session-logs/archive/ so it is not re-surfaced next time.\n\n5. Confirm readiness with a brief summary: handoff file consumed and archived, branch + sync state, top follow-up item from the handoff."
+    },
+    {
+      "name": "review-pr",
+      "model": "claude-sonnet-4-6",
+      "prompt": "Review a pull request for bugs, security issues, missing tests, and code quality.\n\nStep 1 - Resolve the diff: If given a PR number, run gh pr diff NUMBER. If given a branch name, run git diff main...BRANCH. If no arguments, run git diff main...HEAD. Also run git log --oneline main...HEAD for commit context. If the diff is empty, report 'No changes to review' and stop.\n\nStep 2 - Read changed files for full context (not just the diff). Skip trivial changes.\n\nStep 3 - Review checklist (only report findings, skip clean categories):\n- Bugs & Logic Errors: off-by-one, unhandled null/undefined, race conditions, broken control flow\n- Security (OWASP Top 10): injection, auth gaps, data exposure, XSS\n- Missing Tests: new public functions without tests, changed behavior not covered, edge cases\n- API & Contract Changes: breaking changes, removed exports, schema changes\n- Style: only flag correctness/maintainability issues, not formatting\n\nStep 4 - Output as a structured review grouped by file with severity (HIGH/MEDIUM/LOW) and a verdict (Approve/Request Changes/Comment)."
+    },
+    {
+      "name": "babysit-pr",
+      "model": "claude-sonnet-4-6",
+      "prompt": "Monitor a pull request and report its status.\n\n1. If no PR number given, run gh pr view --json number,title,state,url for the current branch. If no PR exists, report that and stop.\n\n2. Run gh pr view PR --json title,state,url,reviewDecision,statusCheckRollup,mergeable,reviews and report: PR number and title, URL, state, check results (passing/failing/pending), review decisions, and mergeability.\n\n3. Advise based on status: if all checks pass and approved, say ready to merge. If checks failing, show which and offer to investigate. If reviews pending or changes requested, summarize. If merge conflicts, report and suggest resolution."
     }
   ]
 }

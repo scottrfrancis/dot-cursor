@@ -1,0 +1,47 @@
+---
+description: Testing strategies — test pyramid, mocking, CI integration, framework-specific notes
+globs: "*.test.*,*.spec.*,**/tests/**,**/test/**,**/__tests__/**,**/conftest.py"
+---
+
+# Testing Strategies
+
+## Test Pyramid
+
+1. **Unit tests** — Fast, isolated, no I/O. Target >=85% on business logic.
+2. **Integration tests** — Verify boundaries: DB queries, API endpoints, service interactions.
+3. **E2E tests** — Critical user flows only. Keep count low.
+
+## Always Test
+
+- Public API contracts (inputs, outputs, error responses)
+- Business logic with branching
+- Error handling paths
+- Security boundaries (auth, tenant isolation, input sanitization)
+
+## Skip Testing
+
+- Framework boilerplate, third-party library behavior
+- Private implementation details, generated code
+
+## Assertions
+
+- One logical assertion per test
+- Assert behavior, not implementation
+- Precise matchers: `toEqual` over `toBeTruthy`
+
+## Mocking
+
+- Mock at boundaries: HTTP clients, databases, clocks
+- Prefer fakes over mocks for simple boundaries
+- Never mock what you don't own without integration test backup
+- Reset mocks between tests
+
+## Edge Cases
+
+- Empty/zero/null, boundary values, invalid types, concurrent access
+
+## Framework Notes
+
+- **JS/TS**: vitest or jest, msw for HTTP, playwright for E2E
+- **Python**: pytest + pytest-cov, conftest.py fixtures
+- **Arduino**: unity framework, hardware behind fakeable interfaces
