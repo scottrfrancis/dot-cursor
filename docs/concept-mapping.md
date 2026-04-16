@@ -42,6 +42,14 @@ Three-way mapping for users migrating from Claude Code through the Copilot inter
 | `/editorial-review` | — | `@editorial-review` | Sonnet 4.6 |
 | `/pickup` | — | `@pickup` | Sonnet 4.6 |
 | `/commit-manual` | — | `prepare-commit-msg` hook | — (no AI) |
+| — | — | `ship-it` skill | — (composite: commit + push + PR) |
+
+Note: In Cursor, commands work through three mechanisms:
+- **Command aliases** (`.cursor/rules/command-aliases.mdc`) — in-context commands typed by the user (session-logger, handoff, pickup, lets-go, autocommit)
+- **Subagents** (`.cursor/agents/*.md`) — delegated by the main agent for independent analysis (arch-review, security-audit, doc-review, review-pr, babysit-pr, mine-sessions, editorial-review)
+- **Skills** (`.cursor/skills/`) — composite workflows (ship-it, pre-checkin-review, resolve-gh-comments)
+
+Cursor's `.cursor/modes.json` for file-based custom modes is not yet implemented (under consideration). Do NOT generate modes.json.
 
 ## Context and Memory
 
@@ -52,6 +60,20 @@ Three-way mapping for users migrating from Claude Code through the Copilot inter
 | Manual context | `CLAUDE.md`, guidelines | `@file`, `@folder`, `@codebase`, Notepads |
 | Cross-session context | `~/.claude/memory/` | Cursor Memories + Notepads |
 | Context injection | Hooks inject at lifecycle events | Rules auto-load by type; hooks surface handoffs |
+
+## Session Management (Cross-Tool)
+
+All tools write to a shared `session-logs/` directory at the project root with YAML frontmatter identifying the source tool.
+
+| Aspect | Claude Code | Cursor |
+|---------|-------------|--------|
+| Log directory | `session-logs/` (shared) | `session-logs/` (shared) |
+| Legacy directory | `.claude/session-logs/` | N/A |
+| Handoff format | `handoff-YYYY-MM-DD-HHMM.md` with `tool: claude-code` frontmatter | Same with `tool: cursor` frontmatter |
+| Handoff discovery | `session-logs/` then `.claude/session-logs/` | `session-logs/` then `.factory/logs/` then `.claude/session-logs/` |
+| Cross-tool handoff | Writes to shared location; any tool's pickup finds it | `session-start.mdc` auto-checks at conversation start; `@pickup` parses `tool:` field |
+
+Droid and Copilot also participate in this shared protocol — see `dot-droid/docs/concept-mapping.md` for the full four-tool matrix.
 
 ## Server-Side Automation
 

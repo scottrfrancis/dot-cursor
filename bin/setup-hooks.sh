@@ -239,17 +239,45 @@ detect_type() {
 
 TYPE=$(detect_type "$DIFF_FILES")
 
-# Detect scope from common parent directory
-SCOPE=""
-if [[ "$FILE_COUNT" -gt 0 ]]; then
-    COMMON_DIR=$(echo "$DIFF_FILES" | head -5 | xargs -I{} dirname {} | sort -u | head -1)
-    if [[ "$COMMON_DIR" != "." && -n "$COMMON_DIR" ]]; then
-        SCOPE="($(basename "$COMMON_DIR"))"
+# Detect scope from changed file paths
+# Maps directory patterns to project-aware scopes.
+# If docs/guidelines/commits-and-branching.md defines scopes, those take precedence.
+detect_scope() {
+    local files="$1"
+    if echo "$files" | grep -qE "^app-stack/backend/"; then
+        echo "api"
+    elif echo "$files" | grep -qE "^app-stack/frontend/"; then
+        echo "frontend"
+    elif echo "$files" | grep -qE "^test-harness/"; then
+        echo "test-harness"
+    elif echo "$files" | grep -qE "^infrastructure/"; then
+        echo "infra"
+    elif echo "$files" | grep -qE "^\.cursor/|^\.github/|^\.droid|^\.factory|\.cursorignore|session-logs/"; then
+        echo "infra"
+    elif echo "$files" | grep -qE "^docs/guidelines/|^docs/adr/"; then
+        echo "guidelines"
+    elif echo "$files" | grep -qE "^docs/design/"; then
+        echo "design"
+    elif echo "$files" | grep -qE "^docs/"; then
+        echo "docs"
+    elif echo "$files" | grep -qE "^scripts/"; then
+        echo "scripts"
+    elif echo "$files" | grep -qE "AGENTS\.md|CONTRIBUTING\.md|README\.md"; then
+        echo "docs"
+    else
+        echo ""
     fi
-fi
+}
+
+SCOPE_NAME=$(detect_scope "$DIFF_FILES")
+SCOPE=""
+[[ -n "$SCOPE_NAME" ]] && SCOPE="(${SCOPE_NAME})"
 
 # Build template commit message
 TEMPLATE="${TYPE}${SCOPE}: "
+
+# Load project-specific scopes hint if available
+SCOPES_HINT="# Scopes: (from file paths, or see docs/guidelines/commits-and-branching.md)"
 
 # Write template + diff context as comment
 {
@@ -259,11 +287,12 @@ TEMPLATE="${TYPE}${SCOPE}: "
     echo "# type(scope): description"
     echo "#"
     echo "# Types: feat fix docs style refactor perf test build ci chore revert"
+    echo "# ${SCOPES_HINT}"
     echo "#"
     echo "# ─── Changed Files (${FILE_COUNT}) ───────────────────"
     echo "$DIFF_STAT" | sed "s/^/# /"
     echo "#"
-    echo "# ─── Suggested type: ${TYPE} ─────────────────────────"
+    echo "# ─── Suggested type: ${TYPE}, scope: ${SCOPE_NAME:-none} ──────"
 } > "$COMMIT_MSG_FILE"
 '
 
@@ -351,23 +380,41 @@ BRANCH_FLAG="$3"  # 1 = branch checkout, 0 = file checkout
 [[ "$BRANCH_FLAG" != "1" ]] && exit 0
 
 SESSION_LOG_DIR="'"${SESSION_LOG_DIR}"'"
+PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 
-# Look for handoff files
-LATEST_HANDOFF=$(find "$SESSION_LOG_DIR" -name "handoff-*.md" -mtime -7 2>/dev/null | sort -r | head -1)
+# Look for handoff files across all cross-tool locations (newest wins)
+LATEST_HANDOFF=""
+for handoff_dir in "$SESSION_LOG_DIR" "${PROJECT_ROOT}/.factory/logs" "${PROJECT_ROOT}/.claude/session-logs"; do
+    CANDIDATE=$(find "$handoff_dir" -name "handoff-*.md" -mtime -7 2>/dev/null | sort -r | head -1)
+    if [[ -n "$CANDIDATE" ]]; then
+        if [[ -z "$LATEST_HANDOFF" ]]; then
+            LATEST_HANDOFF="$CANDIDATE"
+        else
+            # Keep the newer file
+            if [[ "$CANDIDATE" -nt "$LATEST_HANDOFF" ]]; then
+                LATEST_HANDOFF="$CANDIDATE"
+            fi
+        fi
+    fi
+done
 
 if [[ -n "$LATEST_HANDOFF" ]]; then
     HANDOFF_DATE=$(stat -c %Y "$LATEST_HANDOFF" 2>/dev/null || stat -f %m "$LATEST_HANDOFF" 2>/dev/null || echo "0")
     HANDOFF_AGE=$(( ($(date +%s) - HANDOFF_DATE) / 3600 ))
+    # Extract tool from YAML frontmatter if present
+    HANDOFF_TOOL=$(awk "/^tool:/{print \$2; exit}" "$LATEST_HANDOFF" 2>/dev/null)
+    TOOL_LABEL=""
+    [[ -n "$HANDOFF_TOOL" ]] && TOOL_LABEL=" from ${HANDOFF_TOOL}"
     
     echo -e "\n\033[0;36m╔══════════════════════════════════════════╗\033[0m" >&2
-    echo -e "\033[0;36m║  Handoff context available (${HANDOFF_AGE}h old)     ║\033[0m" >&2
+    echo -e "\033[0;36m║  Handoff available (${HANDOFF_AGE}h old${TOOL_LABEL})  ║\033[0m" >&2
     echo -e "\033[0;36m╚══════════════════════════════════════════╝\033[0m" >&2
     echo -e "\033[0;34mBranch:\033[0m ${BRANCH_NAME}" >&2
     echo -e "\033[0;34mFile:\033[0m   ${LATEST_HANDOFF}" >&2
     
     # Show first 5 non-empty, non-header lines as preview
-    grep -v "^#\|^$\|^---" "$LATEST_HANDOFF" 2>/dev/null | head -5 | sed "s/^/  /" >&2
+    grep -v "^#\|^$\|^---\|^tool:\|^timestamp:\|^branch:\|^dirty:\|^files_changed:" "$LATEST_HANDOFF" 2>/dev/null | head -5 | sed "s/^/  /" >&2
     echo -e "\n\033[0;33mTip: Open in Cursor and @mention the handoff file for full context\033[0m\n" >&2
 fi
 

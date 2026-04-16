@@ -391,7 +391,7 @@ $(cat "${PROJECT_DIR}/CLAUDE.md")"
 phase_4_custom_agents() {
     log_info ""
     log_info "═══════════════════════════════════════════════════════"
-    log_info "Phase 4: Generate Custom Agents (.cursor/modes.json)"
+    log_info "Phase 4: Generate Subagents (.cursor/agents/) and Command Aliases"
     log_info "═══════════════════════════════════════════════════════"
     
     if [[ "$NO_AGENTS" == true ]]; then
@@ -399,81 +399,129 @@ phase_4_custom_agents() {
         return
     fi
     
-    local modes_file="${PROJECT_DIR}/.cursor/modes.json"
+    local agents_dir="${PROJECT_DIR}/.cursor/agents"
+    local rules_dir="${PROJECT_DIR}/.cursor/rules"
+    mkdir -p "$agents_dir" "$rules_dir"
     
-    # Build agents from commands
-    # Note: modes.json format may evolve — this generates the current known format
-    # Use heredoc (<<'EOF') so literal single quotes in prompts are safe.
-    local modes_content
-    modes_content=$(cat <<'MODES_EOF'
-{
-  "modes": [
-    {
-      "name": "lets-go",
-      "model": "claude-sonnet-4-6",
-      "prompt": "You are a session initialization agent. Follow this protocol:\n\n1. READ recent session context: Check session-logs/ for handoff-*.md files from the last 7 days. If found, summarize key context.\n2. GIT SYNC: Run git fetch, check ahead/behind status, recommend pull/push/branch as needed.\n3. PROJECT OVERVIEW: Read README.md and any CLAUDE.md or AGENTS.md for project context.\n4. SURFACE ALERTS: Check for stale branches, uncommitted changes, failing CI.\n5. REPORT: Present a concise session start briefing.\n\nKeep it actionable. No fluff."
-    },
-    {
-      "name": "session-logger",
-      "model": "claude-sonnet-4-6",
-      "prompt": "You are a session logging agent. Create a structured session summary:\n\n## Session Log [DATE]\n\n### Activities\n- What was worked on\n\n### Decisions Made\n- Key decisions and rationale\n\n### Reusable Insights\n- Patterns discovered, gotchas encountered\n\n### Effectiveness Assessment\n- What worked well, what was friction\n- Rating: [1-5] with brief justification\n\n### Cross-Links\n- Link to previous session log if applicable\n\nSave to session-logs/session-YYYY-MM-DD-HHMM.md"
-    },
-    {
-      "name": "handoff",
-      "model": "claude-sonnet-4-6",
-      "prompt": "You are a session handoff agent. Generate a forward-looking continuation prompt for the next session. Include:\n\n1. CURRENT STATE: What was being worked on, where things stand\n2. IMMEDIATE NEXT STEPS: What should be done next (ordered)\n3. BLOCKERS/RISKS: Anything the next session needs to know\n4. KEY FILES: Which files are most relevant\n5. CONTEXT: Any decisions or constraints that matter\n\nWrite it as a prompt that could be pasted into a new session to pick up seamlessly.\n\nSave to session-logs/handoff-YYYY-MM-DD-HHMM.md"
-    },
-    {
-      "name": "arch-review",
-      "model": "claude-opus-4-6",
-      "prompt": "You are a Principal Architect conducting a review. Evaluate against:\n\n1. AWS Well-Architected Framework (Security, Reliability, Performance, Cost, Operational Excellence, Sustainability)\n2. SOLID Principles compliance\n3. Security posture (auth, secrets, input validation, dependencies)\n4. Testing strategy (coverage, types, quality)\n5. AI/LLM integration patterns (if applicable): caching, routing, RAG, guardrails\n6. Technical debt assessment\n7. Documentation quality\n\nBe direct. Rate each area. Identify the top 3 highest-impact improvements.\n\nUse Opus-level reasoning — this is where deep analysis matters."
-    },
-    {
-      "name": "autocommit",
-      "model": "claude-haiku-4-5-20251001",
-      "prompt": "Analyze staged changes (git diff --cached) and generate a conventional commit message.\n\nFormat: type(scope): description\n\nTypes: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert\n\nRules:\n- Description is imperative, lowercase, no period\n- Scope is optional but preferred\n- Include body if changes are complex\n- Include BREAKING CHANGE footer if applicable\n\nPresent the commit message and ask for confirmation before committing."
-    },
-    {
-      "name": "mine-sessions",
-      "model": "claude-sonnet-4-6",
-      "prompt": "Analyze session logs in session-logs/ for patterns:\n\n1. Recurring friction points\n2. Decision patterns and evolution\n3. Productivity metrics (sessions per feature, effectiveness ratings)\n4. Reusable insights not yet captured in rules\n5. Process improvement recommendations\n\nPresent findings with specific examples from logs. Recommend concrete actions."
-    },
-    {
-      "name": "security-audit",
-      "model": "claude-opus-4-6",
-      "prompt": "Perform a breach-driven security audit of this web application. Map the credential-compromise-to-data-access attack chain:\n\nPhase 1 - Authentication: Check password hashing (bcrypt/argon2/scrypt vs plaintext), auth fallbacks (do they bypass MFA?), rate limiting on login endpoint, auth event logging (failed + successful), default secrets in code, default role behavior when role is missing.\n\nPhase 2 - Authorization: Validate tenant isolation (can a user access another tenant's data via URL parameter?), role enforcement on admin endpoints (default-deny pattern), access decision logging.\n\nPhase 3 - Input validation: Path traversal (user-controlled path components, ../ escapes), upload validation (size, MIME type, zip bomb protection), internal endpoint authentication (schedulers, health checks).\n\nPhase 4 - Operational security: docker-compose port bindings (0.0.0.0 vs 127.0.0.1), secrets in env vars vs code, secrets in logs.\n\nFor each finding report: ID, Severity (HIGH/MEDIUM/LOW), File + line number, Finding, Breach parallel (how this maps to real attack patterns), Recommendation (specific fix), Effort (Small/Medium/Large).\n\nPrioritize: Direct breach vectors -> Impact amplifiers -> Operational hygiene."
-    },
-    {
-      "name": "doc-review",
-      "model": "claude-sonnet-4-6",
-      "prompt": "Audit this project's documentation for accuracy, DRY, clarity, and new-member accessibility.\n\nPhase 1 - Inventory: Find all docs in this order: README.md, ARCHITECTURE.md / CONTRIBUTING.md / CHANGELOG.md (root), docs/**/*.md. List found files before proceeding.\n\nPhase 2 - Gather ground truth: Before reading docs, collect facts: read package.json scripts, Makefile, pyproject.toml. Run ls at repo root and key subdirectories. This is your source of truth - verify docs against code, not the other way around.\n\nPhase 3 - Review each file:\n- Accuracy: file paths, commands, scripts, architecture descriptions - do they match code?\n- DRY: identical content duplicated across files - consolidate and cross-reference\n- History narration: remove phrases like \"We used to\", \"Previously\", \"As of v2\" - git handles history\n- Clarity: clear start-here path, prerequisites before they are needed, fenced code blocks with language, descriptive headings\n\nIf accuracy is uncertain, add <!-- TODO: verify --> rather than guessing or removing.\n\nPhase 4 - Summary: List files reviewed, issues fixed, items flagged for human review."
-    },
-    {
-      "name": "editorial-review",
-      "model": "claude-sonnet-4-6",
-      "prompt": "Audit the provided prose for AI tells and refine voice and tone. Apply these checks:\n\nPunctuation: Em-dashes (max 2 per piece - prefer colons, periods, or restructuring), semicolons (use sparingly), long parenthetical asides.\n\nSentence construction: Three consecutive sentences starting with the same word. Uniform sentence length (mix short declaratives with longer compound ones). Symmetrical constructions (example: deliberately X, and deliberately Y - break the symmetry). Tricolon overuse (A, B, and C - fine occasionally, not twice per page). Gerund-heavy openers (example: Selecting the right model -> Pick the right model).\n\nTransitions: Throat-clearing (examples: It is worth noting that, This should not surprise anyone). Hedging formulas (examples: It depends on where you sit, the broader point stands). Summary-before-conclusion (final paragraph restating the intro).\n\nWord choice: AI-favored adverbs (fundamentally, essentially, ultimately, importantly, significantly - cut unless genuinely meaningful). Hollow intensifiers (incredibly, extremely, truly). Landscape/ecosystem/paradigm overuse.\n\nStructural tells: Opening question you immediately answer (example: What does this mean? It means...). The to-be-sure sandwich.\n\nFor each issue: quote the offending text, explain why it is a tell, provide a rewrite.\n\nOptional: If the user specifies a style parameter (author name, publication, URL, or adjective), calibrate the target voice accordingly."
-    },
-    {
-      "name": "pickup",
-      "model": "claude-sonnet-4-6",
-      "prompt": "Resume work from the most recent handoff file.\n\n1. Find the most recent handoff-*.md in session-logs/ modified within the last 7 days (sort -r, take first). If none found, say so and suggest running @lets-go instead.\n\n2. Read and display the full contents of the handoff file.\n\n3. Quick git sync: run git fetch origin silently, then report: current branch, commits behind upstream, commits ahead of upstream, dirty/clean working tree (git status --porcelain).\n\n4. Archive the handoff: move the file to session-logs/archive/ so it is not re-surfaced next time.\n\n5. Confirm readiness with a brief summary: handoff file consumed and archived, branch + sync state, top follow-up item from the handoff."
-    },
-    {
-      "name": "review-pr",
-      "model": "claude-sonnet-4-6",
-      "prompt": "Review a pull request for bugs, security issues, missing tests, and code quality.\n\nStep 1 - Resolve the diff: If given a PR number, run gh pr diff NUMBER. If given a branch name, run git diff main...BRANCH. If no arguments, run git diff main...HEAD. Also run git log --oneline main...HEAD for commit context. If the diff is empty, report 'No changes to review' and stop.\n\nStep 2 - Read changed files for full context (not just the diff). Skip trivial changes.\n\nStep 3 - Review checklist (only report findings, skip clean categories):\n- Bugs & Logic Errors: off-by-one, unhandled null/undefined, race conditions, broken control flow\n- Security (OWASP Top 10): injection, auth gaps, data exposure, XSS\n- Missing Tests: new public functions without tests, changed behavior not covered, edge cases\n- API & Contract Changes: breaking changes, removed exports, schema changes\n- Style: only flag correctness/maintainability issues, not formatting\n\nStep 4 - Output as a structured review grouped by file with severity (HIGH/MEDIUM/LOW) and a verdict (Approve/Request Changes/Comment)."
-    },
-    {
-      "name": "babysit-pr",
-      "model": "claude-sonnet-4-6",
-      "prompt": "Monitor a pull request and report its status.\n\n1. If no PR number given, run gh pr view --json number,title,state,url for the current branch. If no PR exists, report that and stop.\n\n2. Run gh pr view PR --json title,state,url,reviewDecision,statusCheckRollup,mergeable,reviews and report: PR number and title, URL, state, check results (passing/failing/pending), review decisions, and mergeability.\n\n3. Advise based on status: if all checks pass and approved, say ready to merge. If checks failing, show which and offer to investigate. If reviews pending or changes requested, summarize. If merge conflicts, report and suggest resolution."
-    }
-  ]
-}
-MODES_EOF
-)
+    # Note: Cursor's .cursor/modes.json is "under consideration" but not implemented.
+    # Subagents (.cursor/agents/*.md) ARE supported — the main agent delegates to them.
+    # Command aliases (.cursor/rules/command-aliases.mdc) handle in-context commands.
+    
+    # --- Subagents (delegated, isolated context) ---
+    
+    write_file "${agents_dir}/arch-review.md" '---
+name: arch-review
+description: "Principal Architect review against Well-Architected, SOLID, security, and project guidelines. Use when evaluating architecture, planning major changes, or assessing technical debt."
+model: inherit
+readonly: true
+is_background: false
+---
 
-    write_file "$modes_file" "$modes_content"
+Before reviewing, load project context: read all files in docs/guidelines/, docs/adr/, docs/design/, and docs/api/openapi.yaml. Skip any that do not exist.
+
+Evaluate against: AWS/Azure Well-Architected, SOLID, security (verify against docs/guidelines/security.md), testing strategy, AI/LLM patterns, technical debt, ADR compliance, documentation quality.
+
+Be direct. Rate each area. Identify the top 3 highest-impact improvements. For significant findings, recommend creating an ADR or a guideline rule. Save report to docs/arch-review-YYYY-MM-DD.md.'
+
+    write_file "${agents_dir}/security-audit.md" '---
+name: security-audit
+description: "Breach-driven security audit. Use when reviewing security posture, after adding auth/endpoint/input handling code, or for periodic assessments."
+model: inherit
+readonly: true
+is_background: false
+---
+
+Before auditing, read docs/guidelines/security.md and docs/learnings/ for project-specific rules. Skip if they do not exist.
+
+Audit the credential-compromise-to-data-access chain: authentication, authorization, input validation, operational security. If docs/guidelines/security.md exists, verify every rule across the codebase.
+
+For each finding: ID, Severity, File+line, Finding, Breach parallel, Recommendation, Effort. Prioritize direct breach vectors. Recommend new rules for docs/guidelines/security.md and ADRs for architectural decisions.'
+
+    write_file "${agents_dir}/doc-review.md" '---
+name: doc-review
+description: "Audit project documentation for accuracy, DRY, clarity, and new-member accessibility. Use when docs may be stale or after major changes."
+model: inherit
+readonly: false
+is_background: false
+---
+
+Inventory all docs: README, AGENTS.md, CONTRIBUTING, docs/guidelines/, docs/adr/, docs/design/, docs/**/*.md. Exclude session-logs/, .factory/, .claude/, node_modules/.
+
+Gather ground truth from code (package.json, pyproject.toml, docker-compose). Verify docs against code. Check guidelines consistency with AGENTS.md and ADR currency. Fix what you can, flag uncertain items with TODO comments. Summarize findings.'
+
+    write_file "${agents_dir}/review-pr.md" '---
+name: review-pr
+description: "PR code review for bugs, security issues, missing tests, and code quality. Use when reviewing pull requests or branch diffs."
+model: inherit
+readonly: true
+is_background: false
+---
+
+Load all files in docs/guidelines/ and docs/adr/ before reviewing. Resolve the diff (gh pr diff or git diff main...HEAD). Read changed files for full context. Review for bugs, security (verify against docs/guidelines/security.md), API rules, data rules, missing tests, contract changes, ADR compliance. Output grouped by file with severity and verdict.'
+
+    write_file "${agents_dir}/babysit-pr.md" '---
+name: babysit-pr
+description: "Monitor a PR for check results, reviews, and merge readiness. If merged, offers branch cleanup."
+model: inherit
+readonly: false
+is_background: false
+---
+
+Check PR status via gh pr view. Report CI checks, reviews, mergeability. If merged, offer cleanup: git checkout main, git pull, delete local branch, git fetch --prune. If closed without merge, offer to delete local branch.'
+
+    write_file "${agents_dir}/mine-sessions.md" '---
+name: mine-sessions
+description: "Analyze session logs for patterns, metrics, and process improvements. Cross-references insights against docs/guidelines/ to find gaps."
+model: inherit
+readonly: true
+is_background: true
+---
+
+Find all session and handoff files in session-logs/, .factory/logs/, .claude/session-logs/. Read docs/guidelines/ for current rule set. Analyze: session metrics, friction points, decision patterns, guideline coverage gaps (insights in 2+ sessions not in any guideline), ADR candidates. The guideline gap analysis is the highest-value output.'
+
+    write_file "${agents_dir}/editorial-review.md" '---
+name: editorial-review
+description: "Audit prose for AI tells and refine voice/tone. Use when reviewing blog posts, documentation prose, or written content."
+model: inherit
+readonly: true
+is_background: false
+---
+
+Check for: em-dash overuse, repeated openers, uniform sentence length, throat-clearing transitions, AI-favored adverbs, hollow intensifiers, structural tells. For each issue: quote the text, explain why it reads as AI-generated, provide a rewrite. If a style is specified, calibrate accordingly.'
+
+    # --- Command aliases (in-context, keeps conversation) ---
+    
+    write_file "${rules_dir}/command-aliases.mdc" '---
+description: "Recognize cross-tool command names so habits transfer from Claude Code and Droid"
+globs: ""
+alwaysApply: true
+---
+
+# Command Aliases
+
+When the user types a command name (with or without a `/` prefix), **execute it immediately**. Do not ask for confirmation or suggest alternatives unless the user explicitly asks for options.
+
+## In-context commands (need conversation context)
+
+- **`session-logger`** or **`/session-logger`** — Create a session log immediately. Write to `session-logs/session-YYYY-MM-DD-HHMM.md` with YAML frontmatter (`tool: cursor`).
+- **`handoff`** or **`/handoff`** — Create a handoff file immediately. Write to `session-logs/handoff-YYYY-MM-DD-HHMM.md` with YAML frontmatter.
+- **`wrap up`** — Do both: session log then handoff.
+- **`pickup`** or **`/pickup`** — Find and read the most recent handoff from `session-logs/`, `.factory/logs/`, or `.claude/session-logs/`.
+- **`autocommit`** or **`/autocommit`** — Read `docs/guidelines/commits-and-branching.md` if it exists, analyze staged changes, generate commit message, ask for confirmation.
+- **`lets-go`** or **`/lets-go`** — Full session init: check for handoffs, git sync, read AGENTS.md, check GitHub board if gh CLI available.
+
+## Delegated commands (run immediately)
+
+- **`arch-review`** — Run a full architecture review.
+- **`security-audit`** — Run a full security audit.
+- **`doc-review`** — Run a full documentation audit.
+- **`review-pr`** — Review the current PR or branch diff.
+- **`babysit-pr`** — Check PR status.
+- **`mine-sessions`** — Analyze session logs for patterns.
+- **`editorial-review`** — Audit prose for AI tells.'
+
+    log_info "Created 7 subagents in .cursor/agents/"
+    log_info "Created command-aliases rule in .cursor/rules/"
 }
 
 ###############################################################################
@@ -638,14 +686,18 @@ alwaysApply: true
 At the beginning of each new conversation:
 
 1. **Check for handoff context**: Look for files matching \`session-logs/handoff-*.md\`.
+   Also check \`.factory/logs/handoff-*.md\` (Droid) and \`.claude/session-logs/handoff-*.md\` (Claude Code/Copilot).
    If any exist from the last 7 days, read the most recent one and incorporate its context.
 
-2. **Acknowledge continuity**: If a handoff file was found, briefly note what was
+2. **Identify source tool**: If the handoff has YAML frontmatter with a \`tool:\` field,
+   note which tool created it (e.g., 'Continuing from a Droid session').
+
+3. **Acknowledge continuity**: If a handoff was found, briefly note what was
    previously in progress and what the recommended next steps were.
 
-3. **If no handoff found**: That's fine — just proceed with the user's request.
+4. **If no handoff found**: That's fine — just proceed with the user's request.
 
-This replaces the Claude Code SessionStart hook that auto-injected handoff context.
+Handoff files are cross-tool. They may have been created by Cursor, Droid, Copilot, or Claude Code.
 "
     write_file "${PROJECT_DIR}/.cursor/rules/session-start.mdc" "$start_rule"
     
@@ -660,20 +712,30 @@ alwaysApply: false
 
 When the user says \"let's wrap up\", \"session end\", or invokes this rule:
 
-1. **Session Log**: Create \`session-logs/session-YYYY-MM-DD-HHMM.md\` with:
-   - Activities performed
-   - Decisions made (with rationale)
-   - Reusable insights
-   - Effectiveness assessment (1-5 rating)
+1. **Session Log**: Create \`session-logs/session-YYYY-MM-DD-HHMM.md\` with YAML frontmatter:
+   \`\`\`
+   ---
+   tool: cursor
+   timestamp: <ISO 8601>
+   branch: <current branch>
+   ---
+   \`\`\`
+   Followed by: Summary, Activities, Decisions Made, Reusable Insights, Effectiveness (1-5).
 
-2. **Handoff**: Create \`session-logs/handoff-YYYY-MM-DD-HHMM.md\` with:
-   - Current state of work
-   - Immediate next steps (ordered)
-   - Blockers or risks
-   - Key files touched
-   - Context for seamless continuation
+2. **Handoff**: Create \`session-logs/handoff-YYYY-MM-DD-HHMM.md\` with YAML frontmatter:
+   \`\`\`
+   ---
+   tool: cursor
+   timestamp: <ISO 8601>
+   branch: <current branch>
+   dirty: <true/false>
+   files_changed: <count>
+   ---
+   \`\`\`
+   Followed by: Completed, Current State, In Progress, Suggested Follow-Up, Key Decisions, Blockers/Risks.
 
-This replaces the Claude Code Stop hook and /session-logger + /handoff commands.
+The YAML frontmatter is required — it identifies the source tool for cross-tool handoffs.
+Any tool (Cursor, Droid, Copilot, Claude Code) can pick up these files.
 "
     write_file "${PROJECT_DIR}/.cursor/rules/session-wrap.mdc" "$wrap_rule"
 }

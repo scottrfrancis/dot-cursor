@@ -1,0 +1,54 @@
+---
+description: Build PDFs from ordered markdown sections using md2pdf CLI and report.yaml config
+globs: ["report.yaml", "**/report.yaml"]
+alwaysApply: false
+---
+
+# md2pdf: Markdown-to-PDF Generation
+
+When the user asks to build a PDF from markdown, or when you encounter a `report.yaml` file:
+
+## The Tool
+
+`md2pdf` is installed at `~/.local/bin/md2pdf`. It reads `report.yaml` from the
+project root and combines ordered markdown sections into a styled PDF via WeasyPrint.
+
+## Commands
+
+```bash
+md2pdf                      # build from ./report.yaml
+md2pdf path/to/report.yaml  # explicit config
+md2pdf --init               # scaffold a report.yaml in cwd
+```
+
+## Config Format (report.yaml)
+
+```yaml
+title: My Report
+footer: "Footer text for each page"
+output: report/output.pdf
+sections:
+  - report/01-intro.md
+  - report/02-body.md
+css: optional/override.css      # optional, replaces default styles
+combined: report/_combined.md   # optional, writes merged markdown
+```
+
+## Pipeline
+
+1. Combines markdown sections in listed order (separated by `---`)
+2. Converts to HTML via python-markdown (tables, extra, sane_lists)
+3. Resolves relative image paths to file:// URIs
+4. Applies CSS (embedded default or project override)
+5. Renders to PDF via WeasyPrint
+
+## Dependencies
+
+- `weasyprint` (Homebrew): `brew install weasyprint`
+- `markdown` (pip): `pip3 install markdown`
+
+## When Setting Up a New Project
+
+1. Run `md2pdf --init` to scaffold report.yaml
+2. Edit sections list to match the project's markdown files
+3. Run `md2pdf` to build

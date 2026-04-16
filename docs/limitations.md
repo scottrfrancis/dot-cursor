@@ -124,11 +124,13 @@ SCRIPT_DIR is detected correctly, and cleanup traps are registered.
 
 ```
 you> @pickup
-cursor> Found handoff: session-logs/handoff-2026-03-10-1800.md (2h old)
+cursor> Found handoff: session-logs/handoff-2026-03-10-1800.md (from Droid session, 2h old)
         Previously: migrating dot-cursor structure to match dot-droid
         Next steps: create install.sh, verify with dry-run
         Branch: main, clean, up to date.
 ```
+
+Handoffs are now cross-tool — `session-logs/` is the shared location, and each handoff file includes YAML frontmatter with a `tool:` field identifying its source. A handoff created in Droid, Copilot, or Claude Code is automatically discovered by Cursor's `@pickup` and `@lets-go`, and vice versa.
 
 The `session-start.mdc` always-apply rule also instructs Cursor to check for recent handoffs at conversation start, but it depends on the model noticing the rule instruction rather than a guaranteed hook.
 
@@ -138,16 +140,16 @@ The `session-start.mdc` always-apply rule also instructs Cursor to check for rec
 
 **Claude Code**: Commands receive structured arguments via `$ARGUMENTS`. Example: `/session-logger performance` passes "performance" as the topic, and the command template interpolates it.
 
-**Cursor**: Agents in `modes.json` don't support structured argument passing.
+**Cursor**: No structured argument passing. Note: `.cursor/modes.json` for file-based custom modes is "under consideration" but **not implemented**. Commands are handled through command aliases (`.cursor/rules/command-aliases.mdc`) and subagents (`.cursor/agents/*.md`).
 
-**Workaround**: Pass context conversationally:
+**Workaround**: Pass context conversationally. The command-aliases rule recognizes command names (with or without `/` prefix) and executes immediately:
 
 ```
 # Claude Code — one shot
 /session-logger performance
 
-# Cursor — conversational
-@session-logger
+# Cursor — conversational (same command name works)
+session-logger
 you> Topic: performance refactoring
 ```
 
