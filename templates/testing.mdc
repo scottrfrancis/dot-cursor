@@ -1,9 +1,33 @@
 ---
-description: Testing strategies — test pyramid, mocking, CI integration, framework-specific notes
+description: Testing strategies — TDD (required), test pyramid, mocking, CI integration, framework-specific notes
 globs: "*.test.*,*.spec.*,**/tests/**,**/test/**,**/__tests__/**,**/conftest.py"
+alwaysApply: false
 ---
 
 # Testing Strategies
+
+## Red-Green-Refactor TDD (REQUIRED — ALWAYS)
+
+**Red-Green-Refactor TDD is mandatory for every code change.** No production code is written without a failing test first. Applies to bug fixes, features, and refactors. There is no "I'll add tests later."
+
+The cycle — repeat for every behavior:
+
+1. **🔴 RED** — Write a failing test expressing the desired behavior. Run it; confirm it fails for the right reason. Do NOT write production code yet.
+2. **🟢 GREEN** — Write the minimum production code to make the failing test pass. No extra logic.
+3. **🔵 REFACTOR** — With tests green, remove duplication, improve names, clarify structure. Tests stay green throughout.
+
+### Non-negotiable rules
+
+- **Never** write production code without a corresponding failing test first.
+- **Never** write more than one failing test at a time.
+- **Never** add production logic beyond what the currently-failing test demands.
+- **Always** run the test between RED and GREEN to verify it actually fails for the right reason.
+- **Always** keep cycles short — minutes, not hours.
+- **No retroactive tests.** Tests added after the code are not TDD and must be flagged in review.
+
+### Narrow exceptions
+
+Only acceptable reasons to write code before a test: **spikes** (throwaway exploratory code, production code must be re-built via TDD), **pure config changes** (no behavior), **generated code** (protobuf/ORM/lockfiles). Anything else: write the test.
 
 ## Test Pyramid
 

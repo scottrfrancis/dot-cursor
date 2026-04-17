@@ -21,6 +21,7 @@
 
 ## Coding Standards
 
+- **Red-Green-Refactor TDD is REQUIRED for ALL code changes.** Always write a failing test first (RED), then the minimum production code to pass (GREEN), then refactor with tests green. No production code without a failing test. No retroactive tests. See `.cursor/rules/testing.mdc` for the full cycle, non-negotiable rules, and the (narrow) exceptions.
 - Conventional commits: `type(scope): description`
 - (Add project-specific standards)
 

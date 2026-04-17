@@ -22,6 +22,7 @@ globs: "*.py,*.pyx,*.pyi"
 - No wildcard imports (`from module import *`)
 
 ## Testing
+- **Red-Green-Refactor TDD is REQUIRED** — failing test first, minimum code to pass, refactor. See `testing.mdc` for the full cycle and rules.
 - pytest, not unittest
 - Fixtures for setup/teardown
 - Parametrize for data-driven tests
