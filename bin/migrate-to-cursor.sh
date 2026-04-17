@@ -365,6 +365,7 @@ $(cat "${PROJECT_DIR}/CLAUDE.md")"
 > Cross-tool instructions file. Read by Cursor, Copilot CLI, Codex, and Gemini CLI.
 
 ## Code Standards
+- **Red-Green-Refactor TDD is REQUIRED for ALL code changes.** Write a failing test first (RED), minimum code to pass (GREEN), refactor with tests green. No production code without a failing test. No retroactive tests. See \`.cursor/rules/testing.mdc\`.
 - Follow conventional commits: \`type(scope): description\`
 - Use \`set -euo pipefail\` in all shell scripts
 - README is the primary documentation hub
@@ -457,7 +458,19 @@ readonly: true
 is_background: false
 ---
 
-Load all files in docs/guidelines/ and docs/adr/ before reviewing. Resolve the diff (gh pr diff or git diff main...HEAD). Read changed files for full context. Review for bugs, security (verify against docs/guidelines/security.md), API rules, data rules, missing tests, contract changes, ADR compliance. Output grouped by file with severity and verdict.'
+## Step 0 — Invoke `/ultrareview` (REQUIRED)
+
+Before anything else, you MUST explicitly invoke the `/ultrareview` slash command (available on Claude 4.7+ models) to run Claude'"'"'s specialized bug-hunting reviewer fleet against the changed files. This is non-optional — `/ultrareview` is the primary source of findings; the manual checklist below is a supplement, not a replacement. Capture its findings and treat any HIGH/critical items as required review items.
+
+If `/ultrareview` is unavailable in the current environment (e.g., the host model/client does not expose the slash command), say so explicitly in the final review output and continue with the manual checklist.
+
+## Manual checklist
+
+Load all files in docs/guidelines/ and docs/adr/ before reviewing. Resolve the diff (gh pr diff or git diff main...HEAD). Read changed files for full context. Review for bugs, security (verify against docs/guidelines/security.md), API rules, data rules, missing tests, contract changes, ADR compliance.
+
+## Output
+
+**Merge findings from `/ultrareview` (Step 0) with findings from the manual checklist**, deduplicating and tagging each with `[ultrareview]` or `[manual]`. Group findings by file with severity and verdict.'
 
     write_file "${agents_dir}/babysit-pr.md" '---
 name: babysit-pr
@@ -676,7 +689,7 @@ phase_7_session_hooks_workaround() {
     
     # Session start context injection
     local start_rule="---
-description: \"Session start protocol — check for handoff context and recent session logs\"
+description: \"Session start protocol — handoff context, session logs, and dot-repo sync check\"
 globs: \"\"
 alwaysApply: true
 ---
@@ -697,13 +710,40 @@ At the beginning of each new conversation:
 
 4. **If no handoff found**: That's fine — just proceed with the user's request.
 
+5. **Dot-Repo Sync Check** (consistent with Claude Code / Copilot / Droid session starts):
+   Cursor works standalone — Claude Code, Droid, Copilot are all optional.
+   This check is **opportunistic**: it runs only against dot-repos that actually exist on this machine.
+   Skip silently for any repo that is not installed, has no remote, or where fetch fails.
+
+   For each dot-repo, if discoverable, run:
+   \`\`\`bash
+   git -C <repo> fetch origin
+   git -C <repo> rev-list --count HEAD..origin/main   # behind
+   git -C <repo> rev-list --count origin/main..HEAD   # ahead
+   git -C <repo> status --porcelain
+   \`\`\`
+
+   **Discovery logic** (try each; skip silently if not present):
+
+   - **dot-cursor** (this tool's own repo — primary): check \`\$DOT_CURSOR_DIR\`, then \`\$HOME/workspace/dot-cursor\`, \`\$HOME/dot-cursor\`, \`/Volumes/workspace/dot-cursor\`. Use the first one that has a \`.git\` directory.
+   - **dot-claude** (optional): check only if \`\$HOME/.claude/.git\` exists.
+   - **dot-droid** (optional): check only if \`\$HOME/.factory\` is a symlink; resolve \`readlink -f \$HOME/.factory\` and take its parent; confirm \`.git\` exists there.
+   - **dot-copilot** (optional): check only if \`.github/copilot-instructions.md\` (or another \`.github/instructions/*.instructions.md\` file) is a symlink in the current project; resolve it and walk up until a \`.git\` directory is found.
+
+   **Alert prominently** for each repo that drifted:
+   - **Behind**: '⚠ {repo-name} is {N} commits behind origin — your rules/commands may be stale. Consider \`git -C {repo} pull\`.'
+   - **Ahead**: '{repo-name} has {N} unpushed commits — consider pushing.'
+   - **Dirty**: '{repo-name} has uncommitted changes.'
+
+   Report nothing for repos that are not installed on this machine.
+
 Handoff files are cross-tool. They may have been created by Cursor, Droid, Copilot, or Claude Code.
 "
     write_file "${PROJECT_DIR}/.cursor/rules/session-start.mdc" "$start_rule"
     
     # Session wrap rule (manual trigger)
     local wrap_rule="---
-description: \"Session wrap-up — generate session log and handoff notes\"
+description: \"Session wrap-up — generate session log, handoff notes, and dot-repo sync check\"
 globs: \"\"
 alwaysApply: false
 ---
@@ -733,6 +773,17 @@ When the user says \"let's wrap up\", \"session end\", or invokes this rule:
    ---
    \`\`\`
    Followed by: Completed, Current State, In Progress, Suggested Follow-Up, Key Decisions, Blockers/Risks.
+
+3. **Dot-Repo Sync Check** (consistent with session start and with Claude Code / Copilot / Droid wrap-ups):
+   Cursor works standalone; this check is **opportunistic** across any dot-repos installed on this machine.
+   Use the same discovery logic as session-start: check each of dot-cursor (primary), dot-claude (only if \`\$HOME/.claude/.git\` exists), dot-droid (only if \`\$HOME/.factory\` is a symlink to a git repo), dot-copilot (only if a \`.github/\` symlink resolves to one). Run fetch + rev-list + status against each found repo; skip silently for any not installed, no remote, or fetch failure.
+
+   **Alert prominently** for each repo that drifted, and record drift in the handoff under Blockers/Risks and in the session log under Session Effectiveness → Process friction:
+   - **Behind**: '⚠ {repo-name} is {N} commits behind origin — run \`git -C {repo} pull\`.'
+   - **Ahead**: '{repo-name} has {N} unpushed commits.'
+   - **Dirty**: '{repo-name} has uncommitted changes.'
+
+   Report nothing for repos that are not installed on this machine.
 
 The YAML frontmatter is required — it identifies the source tool for cross-tool handoffs.
 Any tool (Cursor, Droid, Copilot, Claude Code) can pick up these files.

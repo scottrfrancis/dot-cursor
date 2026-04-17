@@ -4,9 +4,9 @@ This file provides guidance to Claude Code when working on this repository.
 
 ## Project Purpose
 
-This repository installs Cursor IDE configuration from your `~/.claude/` infrastructure. It reads global guidelines and commands, then generates Cursor rules (`.mdc` files), custom agents (`modes.json`), git lifecycle hooks, and GitHub Actions workflows into any target project.
+This repository installs Cursor IDE configuration into any target project. It generates Cursor rules (`.mdc` files), custom subagents, git lifecycle hooks, and GitHub Actions workflows.
 
-It is the Cursor equivalent of `~/.claude/` — the same session protocol, the same agents, the same guidelines — adapted to Cursor's format and automation model.
+It works **standalone** — Claude Code / `~/.claude/` is not required. When `~/.claude/` is available on the same machine, the installer can optionally read its guidelines and commands as a source of rules; when it is not, the installer falls back to the local `templates/` and inline defaults (see `--no-global` in `install.sh`).
 
 ## Repository Structure
 
@@ -62,9 +62,12 @@ The scripts read from `~/.claude/guidelines/` to generate `.cursor/rules/*.mdc` 
 
 ## Development Guidelines
 
-- Follow `~/.claude/guidelines/conventional-commits.md` for commit messages
-- Follow `~/.claude/guidelines/shell-scripts.md` for any changes to `bin/` or `install.sh`
-- When porting content from `~/.claude/` (new guidelines, new commands), update both:
+This repository is standalone and **does not require Claude Code or `~/.claude/` to be installed**. The installer uses `~/.claude/guidelines/` as a source of rules if available (see `--no-global` flag in `install.sh` to skip when absent). Dev-workflow rules below have local copies in `templates/`. The `~/.claude/` paths are optional fallbacks when Claude Code is on the same machine.
+
+- Follow `templates/` conventions (e.g., `testing.mdc`, `python.mdc`) when authoring or modifying `.mdc` templates; optional fallback: `~/.claude/guidelines/` if installed.
+- For commit messages: use conventional commits (the dot-cursor installer copies `~/.claude/guidelines/conventional-commits.md` if present; otherwise follow standard conventional-commits format locally).
+- For any changes to `bin/` or `install.sh`: follow standard shell-script hygiene (`set -euo pipefail`, `SCRIPT_DIR` detection, cleanup traps); optional fallback: `~/.claude/guidelines/shell-scripts.md` if installed.
+- When porting content from `~/.claude/` (only if installed), update both:
   1. The `GUIDELINE_MAP` in `bin/migrate-to-cursor.sh` (Phase 2) for guidelines
   2. The `modes_content` in `bin/migrate-to-cursor.sh` (Phase 4) for commands/agents
   3. The Commands → Agents table in `docs/concept-mapping.md`
