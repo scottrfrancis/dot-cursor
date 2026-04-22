@@ -267,12 +267,14 @@ phase_2_guidelines() {
             ["C4-diagramming"]="*.puml,*.plantuml"
             ["c4-diagramming"]="*.puml,*.plantuml"
             ["markdown-formatting"]="*.md"
+            ["karpathy-principles"]=""  # always-apply, not file-scoped
         )
 
         local -A ALWAYS_APPLY_MAP=(
             ["conventional-commits"]="true"
             ["session-safety"]="true"
             ["prototype-hygiene"]="true"
+            ["karpathy-principles"]="true"
         )
         
         for file in "${DOT_CLAUDE_HOME}/guidelines/"*.md; do
