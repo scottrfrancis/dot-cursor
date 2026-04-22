@@ -101,6 +101,33 @@ your-project/
 
 Plus `.git/hooks/` (not version controlled — installed per clone).
 
+## Self-contained by design
+
+`templates/*.mdc` in this repo is the authoritative source of all Cursor rules. A cursor-only user can clone dot-cursor and run `make install PROJECT=...` with no external dependencies — no `~/.claude/` checkout required.
+
+If `~/.claude/guidelines/*.md` is present on the local machine, the installer merges: template frontmatter (description, globs, alwaysApply) is preserved; body is taken from the local guideline. Pass `--no-global` to skip this and use pure template content. See [Installer Behavior](#installer-behavior) below.
+
+## Installer behavior
+
+| Scenario | Result |
+|---|---|
+| `~/.claude/guidelines/foo.md` exists, `--no-global` NOT set | **Merge** — template frontmatter + local body |
+| `~/.claude/guidelines/foo.md` missing | **Copy** — template verbatim |
+| `--no-global` flag set | **Copy** — template verbatim (regardless of local presence) |
+| Target `.cursor/rules/foo.mdc` exists, `--force` NOT set | **Skip** |
+| `--force` set | **Overwrite** |
+
+## Syncing edits from dot-claude
+
+If you author rule content in [`~/.claude/guidelines/`](https://github.com/scottrfrancis/dot-claude) and want to propagate edits into this repo's templates:
+
+```bash
+make sync-preview   # dry-run — show which templates would change
+make sync           # write the updates into templates/*.mdc
+```
+
+The sync script preserves each template's existing frontmatter and replaces only the body. Review the diff with `git diff templates/` before committing — some templates have Cursor-specific adaptations (e.g. `AGENTS.md` references instead of `CLAUDE.md`) that you may want to re-apply after a sync.
+
 ## Origin
 
 This is the Cursor migration of a [`~/.claude/`](https://github.com/scottrfrancis/dot-claude) setup built for Claude Code, via an intermediate [dot-copilot](https://github.com/scottrfrancis/dot-copilot) port. See [docs/concept-mapping.md](docs/concept-mapping.md) for the full three-way mapping between Claude Code, Copilot, and Cursor.

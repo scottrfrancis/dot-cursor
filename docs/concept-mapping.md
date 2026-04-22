@@ -8,7 +8,7 @@ Three-way mapping for users migrating from Claude Code through the Copilot inter
 |---------|-------------|-------------|--------|
 | Global AI instructions | `~/.claude/CLAUDE.md` | — | Settings → Rules → User Rules |
 | Project AI instructions | `.claude/CLAUDE.md` or `CLAUDE.md` | `.github/copilot-instructions.md` | `.cursor/rules/*.mdc` + `AGENTS.md` |
-| Guidelines (scoped) | `~/.claude/guidelines/*.md` | `.github/instructions/*.instructions.md` | `.cursor/rules/*.mdc` (with globs) |
+| Guidelines (scoped) | `~/.claude/guidelines/*.md` | `.github/instructions/*.instructions.md` | `.cursor/rules/*.mdc` — installed from `dot-cursor/templates/*.mdc` (frontmatter-authoritative); `~/.claude/guidelines/` optionally overrides bodies on install |
 | Custom commands | `~/.claude/commands/*.md` | `.github/agents/*.md` | `.cursor/modes.json` (custom agents) |
 | Project commands | `.claude/commands/*.md` | `.github/agents/*.md` | `.cursor/modes.json` |
 | Settings | `~/.claude/settings.json` | — | Cursor Settings UI |
