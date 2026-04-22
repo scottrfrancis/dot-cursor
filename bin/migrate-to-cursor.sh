@@ -4,10 +4,14 @@ set -euo pipefail
 ###############################################################################
 # migrate-to-cursor.sh
 #
-# Migrates a project from Claude Code / dot-copilot configuration to Cursor IDE.
-# Reads from:
-#   - ~/.claude/guidelines/          (global guidelines)
-#   - ~/.claude/commands/            (global commands)  
+# Installs dot-cursor rules into a project. Works for cursor-only users
+# (templates/ is authoritative) and for users migrating from Claude Code
+# or dot-copilot (local files can override bundled content).
+#
+# Reads from (in priority order):
+#   - ${dot-cursor}/templates/*.mdc  (bundled rules — primary, always available)
+#   - ~/.claude/guidelines/*.md      (optional body override per rule)
+#   - ~/.claude/commands/            (global commands for agents/modes.json)
 #   - .claude/ or .github/           (project-level config)
 #   - CLAUDE.md or AGENTS.md         (project root instructions)
 #
@@ -28,11 +32,13 @@ set -euo pipefail
 #   --dry-run     Show what would be created without writing files
 #   --force       Overwrite existing .cursor/rules/ files  
 #   --no-agents   Skip custom agent generation
-#   --no-global   Skip global ~/.claude/ guidelines migration
+#   --no-global   Skip ~/.claude/guidelines/ overrides (bundled templates only)
 ###############################################################################
 
 VERSION="1.0.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DOT_CURSOR_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+TEMPLATES_DIR="${DOT_CURSOR_DIR}/templates"
 
 # Defaults
 PROJECT_DIR="${1:-.}"
@@ -69,7 +75,7 @@ Options:
   --dry-run       Show what would be created without writing
   --force         Overwrite existing .cursor/rules/ files
   --no-agents     Skip custom agent (modes.json) generation
-  --no-global     Skip migrating ~/.claude/guidelines/
+  --no-global     Skip ~/.claude/guidelines/ overrides (use bundled templates only)
   --help          Show this help
 
 Examples:
@@ -125,37 +131,40 @@ write_file() {
     log_ok "Created: $filepath"
 }
 
-# Convert a guideline markdown file to a .cursor/rules .mdc file
-convert_guideline_to_rule() {
-    local src="$1"
-    local rule_name="$2"
-    local globs="${3:-}"
-    local always_apply="${4:-false}"
-    local description="${5:-}"
-    
-    local dest="${PROJECT_DIR}/.cursor/rules/${rule_name}.mdc"
-    
-    # Read source content, strip any existing YAML frontmatter
-    local content
-    content=$(sed '/^---$/,/^---$/d' "$src" 2>/dev/null || cat "$src")
-    
-    # Build frontmatter
-    local frontmatter="---"
-    if [[ -n "$description" ]]; then
-        frontmatter="${frontmatter}
-description: \"${description}\""
-    else
-        frontmatter="${frontmatter}
-description: \"\""
-    fi
-    frontmatter="${frontmatter}
-globs: \"${globs}\"
-alwaysApply: ${always_apply}
----"
-    
-    write_file "$dest" "${frontmatter}
+# Merge a bundled template's frontmatter with an override's body.
+# Template provides the authoritative frontmatter (description, globs,
+# alwaysApply); override provides the body content (stripped of any
+# frontmatter it might have had).
+merge_template_and_override() {
+    local template="$1"
+    local override="$2"
+    local dest="$3"
 
-${content}"
+    if [[ "$DRY_RUN" == true ]]; then
+        log_info "[DRY RUN] Would merge: ${template} + ${override} → ${dest}"
+        return 0
+    fi
+
+    mkdir -p "$(dirname "$dest")"
+
+    # Extract frontmatter from template (first --- through second --- inclusive)
+    awk '
+        /^---$/ { print; count++; if (count == 2) exit; next }
+        count >= 1 { print }
+    ' "$template" > "$dest"
+
+    # Blank line separating frontmatter from body
+    echo "" >> "$dest"
+
+    # Append body from override, skipping its frontmatter if present
+    if [[ "$(head -1 "$override")" == "---" ]]; then
+        awk '
+            /^---$/ { count++; next }
+            count >= 2 { print }
+        ' "$override" >> "$dest"
+    else
+        cat "$override" >> "$dest"
+    fi
 }
 
 # Convert a copilot instruction file (with applyTo frontmatter) to cursor rule
@@ -248,50 +257,43 @@ phase_2_guidelines() {
     log_info "═══════════════════════════════════════════════════════"
     
     local count=0
-    
-    # Source 1: Global ~/.claude/guidelines/
-    if [[ "$NO_GLOBAL" != true && -d "${DOT_CLAUDE_HOME}/guidelines" ]]; then
-        log_info "Processing global guidelines from ~/.claude/guidelines/..."
-        
-        local -A GUIDELINE_MAP=(
-            ["shell-scripts"]="*.sh,*.bash,Makefile"
-            ["conventional-commits"]=""
-            ["readme-documentation"]="*.md"
-            ["session-safety"]=""  # always-apply
-            ["ai-patterns"]="*.py,*.ts,*.js"
-            ["project-setup"]=""  # agent-requested
-            ["prose-style"]="*.md"
-            ["prototype-hygiene"]=""  # always-apply
-            ["security-hardening"]=""  # agent-requested
-            ["shell-escaping"]="*.sh,*.bash,Dockerfile"
-            ["C4-diagramming"]="*.puml,*.plantuml"
-            ["c4-diagramming"]="*.puml,*.plantuml"
-            ["markdown-formatting"]="*.md"
-            ["karpathy-principles"]=""  # always-apply, not file-scoped
-        )
 
-        local -A ALWAYS_APPLY_MAP=(
-            ["conventional-commits"]="true"
-            ["session-safety"]="true"
-            ["prototype-hygiene"]="true"
-            ["karpathy-principles"]="true"
-        )
-        
-        for file in "${DOT_CLAUDE_HOME}/guidelines/"*.md; do
-            [[ -f "$file" ]] || continue
+    # Source 1: Bundled templates (primary, always available).
+    # Each template has authoritative frontmatter. If ~/.claude/guidelines/
+    # has a matching file AND --no-global is not set, the bundled
+    # frontmatter is merged with the local body (lets dot-claude users tune
+    # guideline content without re-editing .mdc files).
+    if [[ -d "${TEMPLATES_DIR}" ]]; then
+        log_info "Processing bundled templates from ${TEMPLATES_DIR}..."
+
+        for template in "${TEMPLATES_DIR}/"*.mdc; do
+            [[ -f "$template" ]] || continue
             local basename
-            basename=$(basename "$file" .md)
-            local rule_name="${basename}"
-            local globs="${GUIDELINE_MAP[$basename]:-}"
-            local always="${ALWAYS_APPLY_MAP[$basename]:-false}"
-            local desc
-            desc=$(head -5 "$file" | grep '^#' | head -1 | sed 's/^#* *//' || echo "$basename guideline")
-            
-            convert_guideline_to_rule "$file" "$rule_name" "$globs" "$always" "$desc"
-            ((count++))
+            basename=$(basename "$template" .mdc)
+            local dest="${PROJECT_DIR}/.cursor/rules/${basename}.mdc"
+            local override="${DOT_CLAUDE_HOME}/guidelines/${basename}.md"
+
+            if [[ -f "$dest" && "$FORCE" != true ]]; then
+                log_skip "Exists (use --force to overwrite): .cursor/rules/${basename}.mdc"
+                continue
+            fi
+
+            if [[ "$NO_GLOBAL" != true && -f "$override" ]]; then
+                merge_template_and_override "$template" "$override" "$dest"
+                [[ "$DRY_RUN" == true ]] || log_ok "Merged: ${basename}.mdc (template frontmatter + ~/.claude/guidelines body)"
+            else
+                if [[ "$DRY_RUN" == true ]]; then
+                    log_info "[DRY RUN] Would copy: ${template} → ${dest}"
+                else
+                    mkdir -p "$(dirname "$dest")"
+                    cp "$template" "$dest"
+                    log_ok "Created: ${basename}.mdc"
+                fi
+            fi
+            count=$((count + 1))
         done
     else
-        log_skip "Global guidelines (--no-global or ~/.claude/guidelines/ not found)"
+        log_warn "Templates directory not found: ${TEMPLATES_DIR}"
     fi
     
     # Source 2: Project .github/instructions/ (from dot-copilot)
@@ -304,7 +306,7 @@ phase_2_guidelines() {
             basename=$(basename "$file" .instructions.md)
             
             convert_copilot_instruction "$file" "$basename"
-            ((count++))
+            count=$((count + 1))
         done
     fi
     
@@ -325,7 +327,7 @@ phase_2_guidelines() {
             fi
             
             convert_copilot_instruction "$file" "$basename"
-            ((count++))
+            count=$((count + 1))
         done
     fi
     
