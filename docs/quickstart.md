@@ -8,6 +8,8 @@ Get from zero to a fully configured Cursor project in 5 minutes.
 - Git 2.x+ and Bash 4.x+
 - A project with a git repo
 
+**No `~/.claude/` required.** dot-cursor ships all rule content in `templates/*.mdc` and installs it directly. If `~/.claude/guidelines/` happens to be present, the installer will merge your local bodies with the bundled frontmatter (opt out with `--no-global`).
+
 ## Step 1: Clone dot-cursor
 
 ```bash
@@ -81,6 +83,19 @@ make actions PROJECT=/path/to/project   # Just GitHub Actions
 ```bash
 make preview PROJECT=/path/to/project   # Dry-run, prints what would be created
 ```
+
+## What if I also maintain dot-claude?
+
+If you author rule content in `~/.claude/guidelines/*.md` and want it to flow into dot-cursor's templates:
+
+```bash
+cd ~/dot-cursor
+make sync-preview    # dry-run — show which templates would change
+make sync            # write updates into templates/*.mdc (frontmatter preserved)
+git diff templates/  # review before committing
+```
+
+The sync script only overwrites bodies, never frontmatter. New guidelines (no matching template) are reported but skipped — create the template manually first with appropriate `description:`, `globs:`, or `alwaysApply:` metadata.
 
 ## Next Steps
 

@@ -7,11 +7,13 @@
 #   make actions PROJECT=/path/to/your/project    # Just GitHub Actions workflows
 #   make preview PROJECT=/path/to/your/project    # Dry-run, show what would change
 #   make uninstall PROJECT=/path/to/your/project  # Remove hooks + actions
+#   make sync                                     # Sync templates/ from ~/.claude/guidelines/
+#   make sync-preview                             # Dry-run the sync
 
 SHELL := /bin/bash
 PROJECT ?=
 
-.PHONY: install cursor hooks actions preview uninstall help
+.PHONY: install cursor hooks actions preview uninstall sync sync-preview help
 
 help: ## Show this help
 	@echo "dot-cursor — Cursor IDE migration toolkit"
@@ -60,3 +62,9 @@ uninstall: check-project ## Remove hooks and Actions workflows
 	@bin/setup-hooks.sh --uninstall "$(PROJECT)"
 	@bin/setup-actions.sh --remove "$(PROJECT)"
 	@echo "Hooks and workflows removed. .cursor/ rules and AGENTS.md left in place."
+
+sync: ## Propagate ~/.claude/guidelines/ edits into templates/ (preserves template frontmatter)
+	@bin/sync-from-dot-claude.sh
+
+sync-preview: ## Dry-run the sync — show which templates would change
+	@bin/sync-from-dot-claude.sh --dry-run

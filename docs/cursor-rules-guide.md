@@ -102,42 +102,72 @@ In Cursor's Agent chat, type `@` and look for your rule name. If it appears, Cur
 
 ## Default Rules from migrate-to-cursor.sh
 
-The migration script generates these rules (when source guidelines exist):
+The installer copies every `.mdc` in `dot-cursor/templates/` into the target project's `.cursor/rules/`. Template frontmatter is authoritative.
 
-| Rule | Type | Source |
-|------|------|--------|
-| `conventional-commits.mdc` | Always Apply | `~/.claude/guidelines/conventional-commits.md` |
-| `session-safety.mdc` | Always Apply | `~/.claude/guidelines/session-safety.md` |
-| `shell-scripts.mdc` | Auto Attached (`*.sh,*.bash,Makefile`) | `~/.claude/guidelines/shell-scripts.md` |
-| `ai-patterns.mdc` | Auto Attached (`*.py,*.ts,*.js`) | `~/.claude/guidelines/ai-patterns.md` |
-| `session-start.mdc` | Agent Requested | Generated |
-| `session-wrap.mdc` | Agent Requested | Generated |
+**Always Apply** (load in every conversation — be sparing here):
 
-## Templates
+| Rule | Purpose |
+|------|---------|
+| `conventional-commits.mdc` | `type(scope): desc` commit format |
+| `karpathy-principles.mdc` | Surface assumptions; match style; mention don't delete dead code |
+| `prototype-hygiene.mdc` | Config over code; docs describe current state; PRs over branches |
+| `session-safety.mdc` | Hardware/NPU session cleanup rituals |
 
-The `templates/` directory includes ready-to-use rule files:
+**Glob-scoped** (auto-attached when matching files are open):
 
-| Template | Purpose |
-|----------|---------|
-| `always-apply.mdc.template` | Skeleton for an Always Apply rule |
-| `glob-scoped.mdc.template` | Skeleton for a glob-scoped rule |
-| `python.mdc` | Python coding standards |
-| `typescript.mdc` | TypeScript/React standards |
-| `docker.mdc` | Dockerfile and compose standards |
-| `terraform.mdc` | Terraform/IaC standards |
+| Rule | Globs | Purpose |
+|------|-------|---------|
+| `ai-patterns.mdc` | `*.py,*.ts,*.js,*.tsx,*.jsx` | LLM integration patterns |
+| `C4-diagramming.mdc` | `*.puml,*.plantuml` | C4 PlantUML organization |
+| `docker.mdc` | `Dockerfile,docker-compose*.yml` | Container standards |
+| `golang.mdc` | `*.go,go.mod,go.sum` | Go safety + gosec |
+| `markdown-formatting.mdc` | `*.md,*.mdx` | Markdown spacing rules |
+| `python.mdc` | `*.py,pyproject.toml,setup.py` | Python standards |
+| `readme-documentation.mdc` | `*.md` | README organization / DRY |
+| `shell-escaping.mdc` | `*.sh,*.bash,Dockerfile` | Shell quoting rules |
+| `shell-scripts.mdc` | `*.sh,*.bash,Makefile` | SCRIPT_DIR, strict mode |
+| `terraform.mdc` | `*.tf,*.tfvars` | IaC standards |
+| `typescript.mdc` | `*.ts,*.tsx` | TypeScript/React standards |
 
-Copy any template to your project's `.cursor/rules/` and customize.
+**Agent-requested** (activated by description when relevant):
 
-## Migrating Rules from Claude Code
+| Rule | Purpose |
+|------|---------|
+| `ci-local-parity.mdc` | Run CI commands locally before push |
+| `docx-conversion.mdc` | python-docx over pandoc |
+| `md2pdf.mdc` | Markdown → PDF conversion workflow |
+| `pr-token-tracking.mdc` | Include token usage in PR descriptions |
+| `project-setup.mdc` | Tiered bootstrap checklist |
+| `prose-style.mdc` | Anti-AI-smell narrative writing |
+| `security-hardening.mdc` | Breach-driven web security audit |
+| `testing.mdc` | RED-GREEN-REFACTOR TDD cycle |
 
-If you have existing Claude Code guidelines in `~/.claude/guidelines/`, the `migrate-to-cursor.sh` script converts them automatically. The mapping logic:
+Plus these generated rules (not in `templates/`):
 
-1. Reads the source markdown file
-2. Detects rule type from filename patterns (e.g., `shell-*` → `globs: "*.sh,*.bash"`)
-3. Extracts description from the first heading
-4. Generates `.mdc` with proper frontmatter
+| Rule | Type | Purpose |
+|------|------|---------|
+| `command-aliases.mdc` | Always Apply | In-context commands (session-logger, handoff, etc.) |
+| `session-start.mdc` | Agent Requested | Surfaces handoff context on session start |
+| `session-wrap.mdc` | Agent Requested | Generates session log + handoff on demand |
 
-For manual migration, wrap any existing guideline content with frontmatter:
+## Skeletons
+
+For authoring new rules from scratch, copy one of these and fill in:
+
+- `templates/always-apply.mdc.template` — skeleton for an Always Apply rule
+- `templates/glob-scoped.mdc.template` — skeleton for a glob-scoped rule
+
+## Authoring new rules
+
+Three options, in order of preference:
+
+1. **Add directly to `dot-cursor/templates/*.mdc`.** This is the authoritative source. Include a `description:` plus either `globs:` or `alwaysApply: true` (or neither, for agent-requested). New templates are auto-installed by `make install`.
+
+2. **Add to `~/.claude/guidelines/*.md` and sync.** If you maintain a dot-claude authoring surface, write there and run `make sync` from `dot-cursor` to propagate to templates. Note: new guidelines require a matching template file first (sync preserves frontmatter, doesn't invent it).
+
+3. **Project-local rule** in the target project's `.cursor/rules/*.mdc`. Doesn't propagate but is fine for one-off project conventions.
+
+Manual frontmatter template:
 
 ```yaml
 ---
@@ -145,7 +175,7 @@ description: One-line description for Agent Requested loading
 globs: "*.py"  # or alwaysApply: true
 ---
 
-(your existing guideline content here)
+(your rule content here)
 ```
 
 ## Common Pitfalls
