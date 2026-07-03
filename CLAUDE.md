@@ -75,3 +75,22 @@ This repository is standalone and **does not require Claude Code or `~/.claude/`
 ## Branch Policy
 
 Work on feature branches. Main is the stable configuration that users clone and run.
+<\!-- central-ops-knowledge: begin -->
+## Central Ops Knowledge (shared doctrine — all my AI tools)
+
+I maintain ONE central, authoritative **ops-knowledge state** for my homelab/home: **dynamic**
+(live, current, queryable by every human and AI on the LAN) and **archival** (durable,
+portable, hand-off-able to anyone taking over anything). It lives in the **HomeAssistant repo**
+(`/Volumes/workspace/HomeAssistant/` → `home-ops/` OKF bundle + `wiki/`), is surfaced
+live by the **Librarian RAG + Hazel** (OpenWebUI on `mini.local`), and kept current by the
+`tools/*-scan.sh` self-tracking probes. Full doctrine: `~/.claude/guidelines/central-ops-knowledge.md`.
+
+Operating rules for every agent (Claude, OpenCode, Codex, Cursor, Droid, Copilot…):
+1. **Consult before acting on infrastructure** — before stopping/changing a service, host, or
+   config, check the knowledge base for "what is this and *why*." Stale assumptions cause outages.
+2. **Write back** — when you learn or change something about the ops state, record or flag it so
+   it stays current. Session-only knowledge is lost.
+3. **OKF form** — plain markdown + YAML, **no secrets** (pointers only), conformant for any tool.
+4. **Local-first / WAN-tolerant** — prefer local LLM/files/Kiwix; must work with the internet down.
+5. **Respect boundaries** — household surfaces LAN-only; don't touch non-Scott tailnet hosts.
+<\!-- central-ops-knowledge: end -->
