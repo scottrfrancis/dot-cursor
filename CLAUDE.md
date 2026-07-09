@@ -82,8 +82,12 @@ I maintain ONE central, authoritative **ops-knowledge state** for my homelab/hom
 (live, current, queryable by every human and AI on the LAN) and **archival** (durable,
 portable, hand-off-able to anyone taking over anything). It lives in the **HomeAssistant repo**
 (`/Volumes/workspace/HomeAssistant/` → `home-ops/` OKF bundle + `wiki/`), is surfaced
-live by the **Librarian RAG + Hazel** (OpenWebUI on `mini.local`), and kept current by the
-`tools/*-scan.sh` self-tracking probes. Full doctrine: `~/.claude/guidelines/central-ops-knowledge.md`.
+live to agents via the read-only **`kb-mcp` filesystem MCP** (`mini.local:8092`, tools
+`search`/`read_file`/`list_dir`; registered in **Hazel**/OpenWebUI and reusable by any MCP
+client) and to humans via **`kb-static`** browse (`mini.local:8090`), and kept current by the
+`tools/*-scan.sh` self-tracking probes. (Ingesting the bundle into the **Librarian RAG** is on
+indefinite hold — the MCP reads markdown live, no re-index.) Full doctrine:
+`~/.claude/guidelines/central-ops-knowledge.md`.
 
 Operating rules for every agent (Claude, OpenCode, Codex, Cursor, Droid, Copilot…):
 1. **Consult before acting on infrastructure** — before stopping/changing a service, host, or
