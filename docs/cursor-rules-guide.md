@@ -42,7 +42,7 @@ Loaded automatically when matching files are open or referenced. This is the mos
 
 ```yaml
 ---
-description: Guidelines for handling Oil & Gas alarm management data structures
+description: Guidelines for handling time-series sensor data structures
 ---
 ```
 
