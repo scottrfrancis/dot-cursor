@@ -1,0 +1,39 @@
+---
+description: Git workflow discipline — branch + PR required for every change to main
+alwaysApply: true
+---
+
+# Git Workflow
+
+Branch + PR for every change. Direct pushes to `main` are prohibited.
+
+## Hard rules — never violate without explicit user override
+
+1. **Never commit on `main`.** Before any commit, run `git branch --show-current`;
+   if it's `main`, `git switch -c <type>/<slug> origin/main` first.
+2. **Never `git push origin main`.** Push feature branches only
+   (`git push -u origin HEAD` after `git switch -c`).
+3. **Never `git push --force` to `main`** (not even `--force-with-lease`). On feature
+   branches, `--force-with-lease` after rebase is fine.
+4. **Never rewrite `main`'s history** — no interactive rebase, hard reset, or filter of `main`.
+
+## Branch naming
+
+`<type>/<kebab-slug>` — Conventional Commits types: `feat` `fix` `docs` `refactor`
+`test` `build` `ci` `perf` `style` `chore` `revert`.
+
+## PR flow
+
+1. `gh pr create --fill` (title MUST be Conventional Commits format).
+2. Merge with squash: `gh pr merge --squash --delete-branch`.
+
+## Self-merge policy
+
+| PR scope | Agent may self-merge? |
+|---|---|
+| Doc-only (no code) | Yes, after explicit approval |
+| Code / tests / config | No — wait for human approval |
+| Agent rules | No — always wait for human approval |
+
+When this rule conflicts with user intent, stop and surface it; offer the PR path as
+default. Only bypass on unambiguous override.
